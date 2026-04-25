@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.2
+
+- Added a Windows Companion installer/downloader executable.
+- Installer installs Companion into `%LOCALAPPDATA%`, registers current-user login startup, and supports `--uninstall`.
+- Companion now has a tray menu toggle for launching itself at login.
+- Added Windows code-signing script and signing documentation.
+
 ## v0.3.1
 
 - Added a Windows x64 portable Companion build artifact.

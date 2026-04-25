@@ -146,6 +146,7 @@ async function showStatusDialog() {
 }
 
 function rebuildMenu() {
+  const loginItem = app.getLoginItemSettings();
   const menu = Menu.buildFromTemplate([
     { label: `Status: ${lastStatus}`, enabled: false },
     { type: "separator" },
@@ -156,6 +157,18 @@ function rebuildMenu() {
     { label: "Stop Local Services", click: stopServices },
     { label: "Refresh Status", click: refresh },
     { type: "separator" },
+    {
+      label: "Launch Companion at Login",
+      type: "checkbox",
+      checked: Boolean(loginItem.openAtLogin),
+      click: (menuItem) => {
+        app.setLoginItemSettings({
+          openAtLogin: menuItem.checked,
+          openAsHidden: true,
+        });
+        rebuildMenu();
+      },
+    },
     { label: "Open Config Folder", click: openConfigFolder },
     { label: "Show Details", click: showStatusDialog },
     { type: "separator" },
