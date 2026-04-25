@@ -1,17 +1,1 @@
-{
-  "name": "CodexHub",
-  "short_name": "CodexHub",
-  "start_url": "/",
-  "scope": "/",
-  "display": "standalone",
-  "orientation": "any",
-  "background_color": "#f8f9fd",
-  "theme_color": "#336289",
-  "icons": [
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
-  ]
-}
+ewogICJuYW1lIjogIkNvZGV4SHViIiwKICAic2hvcnRfbmFtZSI6ICJDb2RleEh1YiIsCiAgInN0YXJ0X3VybCI6ICIvIiwKICAic2NvcGUiOiAiLyIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsCiAgIm9yaWVudGF0aW9uIjogImFueSIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiI2Y4ZjlmZCIsCiAgInRoZW1lX2NvbG9yIjogIiMzMzYyODkiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICIvaWNvbi5zdmciLAogICAgICAic2l6ZXMiOiAiYW55IiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIKICAgIH0sCiAgICB7CiAgICAgICJzcmMiOiAiL2ljb24tNTEyLnBuZyIsCiAgICAgICJzaXplcyI6ICI1MTJ4NTEyIiwKICAgICAgInR5cGUiOiAiaW1hZ2UvcG5nIiwKICAgICAgInB1cnBvc2UiOiAiYW55IgogICAgfSwKICAgIHsKICAgICAgInNyYyI6ICIvbWFza2FibGUtaWNvbi01MTIucG5nIiwKICAgICAgInNpemVzIjogIjUxMng1MTIiLAogICAgICAidHlwZSI6ICJpbWFnZS9wbmciLAogICAgICAicHVycG9zZSI6ICJtYXNrYWJsZSIKICAgIH0KICBdCn0K
