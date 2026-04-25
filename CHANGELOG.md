@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.1
+
+- Added `CODEXHUB_PUBLIC_URL` so generated desktop install commands stay correct behind multi-hop HTTPS reverse proxies.
+
 ## v0.2.0
 
 - Added Linux desktop agent installer and uninstaller with systemd user services.

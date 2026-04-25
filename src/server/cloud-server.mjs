@@ -8,6 +8,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const PUBLIC_DIR = path.join(ROOT, "public");
 const PORT = Number(process.env.CODEXHUB_PORT ?? process.env.PORT ?? 8787);
 const HOST = process.env.CODEXHUB_HOST ?? "0.0.0.0";
+const PUBLIC_URL = process.env.CODEXHUB_PUBLIC_URL ? stripSlash(process.env.CODEXHUB_PUBLIC_URL) : "";
 const ADMIN_TOKEN = process.env.CODEXHUB_ADMIN_TOKEN ?? process.env.CODEXHUB_TOKEN ?? "dev-token";
 const INSTALL_KEY = process.env.CODEXHUB_INSTALL_KEY ?? process.env.CODEXHUB_TOKEN ?? ADMIN_TOKEN;
 const DATA_FILE = process.env.CODEXHUB_DATA_FILE
@@ -26,6 +27,10 @@ const state = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function stripSlash(value) {
+  return String(value).replace(/\/+$/, "");
 }
 
 function safeJsonParse(text) {
@@ -134,6 +139,7 @@ function writeJson(res, status, body, extraHeaders = {}) {
 }
 
 function getPublicBaseUrl(req) {
+  if (PUBLIC_URL) return PUBLIC_URL;
   const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim();
   const forwardedHost = String(req.headers["x-forwarded-host"] ?? "").split(",")[0].trim();
   const proto = forwardedProto || (req.socket.encrypted ? "https" : "http");
