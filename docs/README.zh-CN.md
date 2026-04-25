@@ -34,6 +34,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
   -NodeName "TMT1"
 ```
 
+Windows Companion 桌面托盘：
+
+```powershell
+.\codexhub-companion-installer-windows-x64-v0.3.3.exe
+```
+
+这个安装器会安装 Companion、写入开机启动、创建开始菜单快捷方式，并在 Windows “应用和功能”里提供卸载入口。正式消除 SmartScreen 提示需要真实代码签名证书。
+
 手机端：
 
 打开 `https://你的服务器域名`，用 `ADMIN_TOKEN` 登录。

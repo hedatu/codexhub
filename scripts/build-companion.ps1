@@ -1,7 +1,8 @@
 param(
   [string]$CompanionDir = "$PSScriptRoot\..\companion\desktop",
   [switch]$Install,
-  [switch]$Dist
+  [switch]$Dist,
+  [switch]$Sign
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,20 @@ try {
     npm run dist
   } else {
     npm run pack
+  }
+
+  $signingConfigured = $env:CODEXHUB_CODESIGN_THUMBPRINT -or $env:CODEXHUB_CODESIGN_PFX
+  if ($Sign -or $signingConfigured) {
+    $exeCandidates = @(
+      Join-Path $CompanionDir "dist\win-unpacked\CodexHub Companion.exe"
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+    if ($exeCandidates.Count -gt 0) {
+      & (Join-Path $PSScriptRoot "sign-windows-artifacts.ps1") -Path $exeCandidates
+    } elseif ($IsWindows -or $env:OS -eq "Windows_NT") {
+      Write-Warning "No Windows Companion executable was found to sign."
+    }
+  } else {
+    Write-Warning "Companion code signing skipped. Set CODEXHUB_CODESIGN_THUMBPRINT or CODEXHUB_CODESIGN_PFX, or pass -Sign after configuring a certificate."
   }
 } finally {
   Pop-Location

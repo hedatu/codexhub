@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.3.2"
+  [string]$Version = "0.3.3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -126,6 +126,19 @@ Copy-Items @(
   "docs\PLATFORM_SUPPORT.md"
 ) $companionDir
 Compress-Archive -Path (Join-Path $companionDir "*") -DestinationPath (Join-Path $dist "codexhub-companion-v$Version.zip") -Force
+
+$companionWinUnpacked = Join-Path $root "companion\desktop\dist\win-unpacked"
+if (Test-Path -LiteralPath $companionWinUnpacked) {
+  Compress-Archive -Path (Join-Path $companionWinUnpacked "*") -DestinationPath (Join-Path $dist "codexhub-companion-windows-x64-v$Version.zip") -Force
+} else {
+  Write-Warning "companion\desktop\dist\win-unpacked was not found; skipping Windows x64 Companion portable zip."
+}
+
+if (Get-Command go.exe -ErrorAction SilentlyContinue) {
+  & (Join-Path $PSScriptRoot "build-windows-companion-installer.ps1") -Version $Version -OutputDir $dist
+} else {
+  Write-Warning "go.exe was not found; skipping Windows Companion installer build."
+}
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 Get-ChildItem -LiteralPath $dist -File | Select-Object Name,Length

@@ -1,6 +1,7 @@
 param(
-  [string]$Version = "0.3.2",
-  [string]$OutputDir = "$PSScriptRoot\..\dist"
+  [string]$Version = "0.3.3",
+  [string]$OutputDir = "$PSScriptRoot\..\dist",
+  [switch]$Sign
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,4 +18,13 @@ $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 go build -ldflags "-s -w -X main.defaultVersion=$Version" -o $target $source
 
+$signingConfigured = $env:CODEXHUB_CODESIGN_THUMBPRINT -or $env:CODEXHUB_CODESIGN_PFX
+if ($Sign -or $signingConfigured) {
+  & (Join-Path $PSScriptRoot "sign-windows-artifacts.ps1") -Path $target
+} else {
+  Write-Warning "Code signing skipped. Set CODEXHUB_CODESIGN_THUMBPRINT or CODEXHUB_CODESIGN_PFX, or pass -Sign after configuring a certificate."
+}
+
+$hash = Get-FileHash -LiteralPath $target -Algorithm SHA256
 Get-Item -LiteralPath $target | Select-Object Name,Length,LastWriteTime
+$hash | Select-Object Path,Hash

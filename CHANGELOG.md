@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.3
+
+- Upgraded the Windows Companion installer into a more formal per-user installer.
+- Installer now creates a Start Menu shortcut and a Windows Apps & Features uninstall entry.
+- Installer can verify the downloaded Companion zip with an optional `--sha256` value.
+- Build scripts now print SHA256 output and automatically sign when code-signing certificate environment variables are configured.
+- Updated signing documentation for the full installer, Companion executable, and real certificate requirements.
+
 ## v0.3.2
 
 - Added a Windows Companion installer/downloader executable.
