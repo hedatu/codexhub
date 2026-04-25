@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+- Added a Windows x64 portable Companion build artifact.
+- Added `package-lock.json` for reproducible Companion builds.
+- Documented the unsigned portable build and the next code-signing step.
+
 ## v0.3.0
 
 - Added CodexHub Companion, an Electron tray/menu-bar app for Windows, macOS, and Linux.

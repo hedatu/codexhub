@@ -24,6 +24,8 @@ npm run start
 npm run dist
 ```
 
+On Windows without code-signing privileges, `electron-builder` may still produce `dist/win-unpacked` even if the NSIS installer step fails. Zip that folder to create an unsigned portable build. Users can run `CodexHub Companion.exe` directly after extraction.
+
 The Electron Builder config targets:
 
 - Windows: NSIS installer and portable exe.
@@ -37,3 +39,5 @@ The Electron Builder config targets:
 Windows 上会控制任务计划里的 `CodexHubFarfield` 和 `CodexHubAgent`。
 macOS 上会控制 LaunchAgents。
 Linux 上会控制 systemd user services。
+
+Windows 无签名环境下，如果安装包步骤失败，但已经生成 `dist/win-unpacked`，可以把这个目录压缩成便携版。用户解压后直接运行 `CodexHub Companion.exe`。
