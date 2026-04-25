@@ -29,7 +29,10 @@ function Copy-Items($items, $target) {
   foreach ($item in $items) {
     $src = Join-Path $root $item
     if (Test-Path -LiteralPath $src) {
-      Copy-Item -LiteralPath $src -Destination $target -Recurse -Force
+      $relativeParent = Split-Path -Path $item -Parent
+      $destParent = if ($relativeParent) { Join-Path $target $relativeParent } else { $target }
+      New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+      Copy-Item -LiteralPath $src -Destination $destParent -Recurse -Force
     }
   }
 }
@@ -61,8 +64,18 @@ Copy-Items @(
   "src\desktop-agent",
   "scripts\install-desktop-agent.ps1",
   "scripts\uninstall-desktop-agent.ps1",
+  "scripts\windows\codex-wrapper.go",
   "docs"
 ) $agentDir
+$wrapperSource = Join-Path $root "scripts\windows\codex-wrapper.go"
+$wrapperTargetDir = Join-Path $agentDir "scripts\windows"
+$wrapperTarget = Join-Path $wrapperTargetDir "codex-wrapper.exe"
+if (Get-Command go.exe -ErrorAction SilentlyContinue) {
+  New-Item -ItemType Directory -Force -Path $wrapperTargetDir | Out-Null
+  & go build -o $wrapperTarget $wrapperSource
+} elseif (-not (Test-Path -LiteralPath $wrapperTarget)) {
+  Write-Warning "go.exe was not found; Windows agent package will not include scripts\windows\codex-wrapper.exe."
+}
 Compress-Archive -Path (Join-Path $agentDir "*") -DestinationPath (Join-Path $dist "codexhub-windows-agent-v$Version.zip") -Force
 
 Remove-Item -LiteralPath $stage -Recurse -Force

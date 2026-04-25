@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1
+
+- Fixed Windows scheduled task registration for standard interactive users.
+- Added a Windows Codex CLI wrapper so Farfield can call `codex app-server` without `spawn EPERM`.
+- Windows desktop installer now registers both `CodexHubFarfield` and `CodexHubAgent` when run from the packaged release.
+- Windows uninstall script now removes both scheduled tasks.
+
 ## v0.1.0
 
 - Initial public release.

@@ -65,6 +65,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
   -NodeName "TMT1"
 ```
 
+Run this from an Administrator PowerShell window. The packaged Windows agent registers two logon tasks: `CodexHubFarfield` starts the local Farfield server, and `CodexHubAgent` connects the computer to your cloud dashboard. The Windows package includes a small Codex CLI wrapper to avoid Windows `spawn EPERM` errors when Farfield starts `codex app-server`.
+
 Mobile:
 
 Open `https://hub.example.com`, sign in with `ADMIN_TOKEN`, then add the PWA to your Android home screen.
@@ -83,9 +85,9 @@ After installation, each computer only uses its own `nodeKey`. You can rotate or
 
 Release assets:
 
-- `codexhub-server-v0.1.0.zip`
-- `codexhub-windows-agent-v0.1.0.zip`
-- `codexhub-source-v0.1.0.zip`
+- `codexhub-server-v0.1.1.zip`
+- `codexhub-windows-agent-v0.1.1.zip`
+- `codexhub-source-v0.1.1.zip`
 
 ### Acknowledgements
 
@@ -154,6 +156,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
   -NodeName "TMT1"
 ```
 
+请在“管理员 PowerShell”里运行这条命令。打包版 Windows agent 会注册两个开机任务：`CodexHubFarfield` 负责启动本机 Farfield 服务，`CodexHubAgent` 负责连接云端控制台。Windows 包里带了一个很小的 Codex CLI 包装器，用来规避 Farfield 在 Windows 上启动 `codex app-server` 时可能出现的 `spawn EPERM` 问题。
+
 手机端：
 
 打开 `https://hub.example.com`，用 `ADMIN_TOKEN` 登录，然后在安卓浏览器里添加到主屏幕。
@@ -172,9 +176,9 @@ CodexHub 使用三类凭据：
 
 Release 包：
 
-- `codexhub-server-v0.1.0.zip`
-- `codexhub-windows-agent-v0.1.0.zip`
-- `codexhub-source-v0.1.0.zip`
+- `codexhub-server-v0.1.1.zip`
+- `codexhub-windows-agent-v0.1.1.zip`
+- `codexhub-source-v0.1.1.zip`
 
 ### 致谢
 

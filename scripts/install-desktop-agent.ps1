@@ -9,6 +9,7 @@ param(
   [string]$NodeName = $env:COMPUTERNAME,
   [string]$FarfieldUrl = "http://127.0.0.1:4311",
   [string]$InstallDir = "$env:ProgramData\CodexHub",
+  [switch]$NoFarfield,
   [switch]$NoScheduledTask
 )
 
@@ -31,8 +32,15 @@ if (-not (Test-Path -LiteralPath $agentSource)) {
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "src\desktop-agent") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "bin") | Out-Null
 
 Copy-Item -LiteralPath $agentSource -Destination (Join-Path $InstallDir "src\desktop-agent\agent.mjs") -Force
+
+$wrapperSource = Join-Path $repoRoot "scripts\windows\codex-wrapper.exe"
+$wrapperPath = Join-Path $InstallDir "bin\codex-wrapper.exe"
+if (Test-Path -LiteralPath $wrapperSource) {
+  Copy-Item -LiteralPath $wrapperSource -Destination $wrapperPath -Force
+}
 
 $configPath = Join-Path $InstallDir "agent.json"
 $config = [ordered]@{
@@ -51,20 +59,39 @@ $taskName = "CodexHubAgent"
 $args = "`"$agentPath`" --config `"$configPath`""
 
 if (-not $NoScheduledTask) {
+  $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+
+  if (-not $NoFarfield) {
+    if (-not (Test-Path -LiteralPath $wrapperPath)) {
+      throw "Cannot find scripts\windows\codex-wrapper.exe. Use the packaged Windows agent zip or run with -NoFarfield."
+    }
+    $farfieldCommand = "`$env:CODEX_CLI_PATH = '$wrapperPath'; `$env:PORT = '4311'; Set-Location '$env:USERPROFILE'; & npx.cmd -y '@farfield/server@latest'"
+    $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -Command $farfieldCommand"
+    $farfieldTrigger = New-ScheduledTaskTrigger -AtLogOn
+    Register-ScheduledTask -TaskName "CodexHubFarfield" -Action $farfieldAction -Trigger $farfieldTrigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName "CodexHubFarfield" -ErrorAction Stop
+  }
+
   $action = New-ScheduledTaskAction -Execute $nodeExe -Argument $args
   $trigger = New-ScheduledTaskTrigger -AtLogOn
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel LeastPrivilege
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-  Start-ScheduledTask -TaskName $taskName
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+  Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 }
 
 Write-Host "CodexHub desktop agent installed."
 Write-Host "Config: $configPath"
 Write-Host "Node: $NodeId"
 Write-Host "Server: $Server"
+if (-not $NoFarfield) {
+  Write-Host "Farfield: $FarfieldUrl"
+}
 if ($NoScheduledTask) {
   Write-Host "Run manually: `"$nodeExe`" $args"
 } else {
   Write-Host "Scheduled task: $taskName"
+  if (-not $NoFarfield) {
+    Write-Host "Scheduled task: CodexHubFarfield"
+  }
 }

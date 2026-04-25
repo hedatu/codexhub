@@ -3,11 +3,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$taskName = "CodexHubAgent"
+$taskNames = @("CodexHubAgent", "CodexHubFarfield")
 
-if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+foreach ($taskName in $taskNames) {
+  if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+  }
 }
 
 if (Test-Path -LiteralPath $InstallDir) {
