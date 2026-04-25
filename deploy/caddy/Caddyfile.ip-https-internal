@@ -1,0 +1,11 @@
+# No-domain HTTPS mode with Caddy's internal CA.
+# Replace YOUR_SERVER_IP with your server public IP.
+#
+# Android/desktop browsers will warn unless you install/trust Caddy's root CA.
+# Useful for private deployment when you control the client devices.
+
+https://YOUR_SERVER_IP {
+  tls internal
+  encode gzip
+  reverse_proxy 127.0.0.1:8787
+}

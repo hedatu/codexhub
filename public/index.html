@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#336289" />
+    <title>CodexHub 控制台</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <aside class="rail">
+        <div class="brand">
+          <div class="brand-mark">CH</div>
+          <div>
+            <div class="brand-title">CodexHub</div>
+            <div class="brand-subtitle">云手机端综合控制台</div>
+          </div>
+        </div>
+        <nav class="rail-nav" aria-label="主导航">
+          <button class="nav-item active" data-view="overview" title="概览">⌘<span>概览</span></button>
+          <button class="nav-item" data-view="nodes" title="节点">▣<span>节点</span></button>
+          <button class="nav-item" data-view="attention" title="待处理">!<span>待处理</span></button>
+          <button class="nav-item" data-view="settings" title="设置">⚙<span>设置</span></button>
+        </nav>
+        <div class="rail-footer">
+          <span id="syncDot" class="dot muted"></span>
+          <span id="syncText">未连接</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Codex fleet</p>
+            <h1>Codex 控制台</h1>
+          </div>
+          <div class="top-actions">
+            <button id="refreshBtn" class="icon-button" title="刷新">↻</button>
+            <button id="settingsBtn" class="icon-button" title="连接设置">⚙</button>
+          </div>
+        </header>
+
+        <section id="loginPanel" class="login-panel hidden">
+          <div class="login-card">
+            <h2>连接云端服务器</h2>
+            <p>输入部署在你服务器上的 CodexHub 地址和访问令牌。令牌只保存在当前浏览器。</p>
+            <label>
+              <span>服务器地址</span>
+              <input id="serverInput" type="url" placeholder="https://hub.example.com" />
+            </label>
+            <label>
+              <span>访问令牌</span>
+              <input id="tokenInput" type="password" placeholder="CODEXHUB_TOKEN" />
+            </label>
+            <button id="saveConfigBtn" class="primary-button">连接</button>
+          </div>
+          <div id="installPanel" class="login-card install-card hidden">
+            <div class="section-head compact">
+              <div>
+                <h2>RustDesk 式接入信息</h2>
+                <p>把这段命令发到每台电脑上执行。电脑会用安装密钥加入，再保存自己的设备密钥。</p>
+              </div>
+            </div>
+            <label>
+              <span>手机端服务器</span>
+              <input id="mobileServerOutput" readonly />
+            </label>
+            <label>
+              <span>手机端管理密钥</span>
+              <input id="adminTokenOutput" readonly />
+            </label>
+            <label>
+              <span>电脑端安装密钥</span>
+              <input id="installKeyOutput" readonly />
+            </label>
+            <label>
+              <span>电脑端安装命令</span>
+              <textarea id="desktopInstallCommand" readonly></textarea>
+            </label>
+            <div class="quick-actions">
+              <button class="secondary-button" data-copy-target="desktopInstallCommand">复制电脑安装命令</button>
+              <button class="secondary-button" data-copy-target="adminTokenOutput">复制手机管理密钥</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="content" class="content">
+          <section class="summary-grid" aria-label="状态摘要">
+            <article class="metric-card strong">
+              <span>在线节点</span>
+              <strong id="metricOnline">0/0</strong>
+            </article>
+            <article class="metric-card">
+              <span>运行中</span>
+              <strong id="metricRunning">0</strong>
+            </article>
+            <article class="metric-card warning">
+              <span>等待回复</span>
+              <strong id="metricReply">0</strong>
+            </article>
+            <article class="metric-card danger">
+              <span>待审批</span>
+              <strong id="metricApproval">0</strong>
+            </article>
+          </section>
+
+          <section class="workbench">
+            <div class="panel attention-panel">
+              <div class="section-head">
+                <div>
+                  <h2>需要处理</h2>
+                  <p>等待回复、待审批和报错会优先显示</p>
+                </div>
+                <span id="attentionCount" class="pill">0</span>
+              </div>
+              <div id="attentionList" class="attention-list"></div>
+            </div>
+
+            <div class="panel nodes-panel">
+              <div class="section-head compact">
+                <div>
+                  <h2>终端节点</h2>
+                  <p id="nodeRange">等待上报</p>
+                </div>
+                <select id="statusFilter" aria-label="状态筛选">
+                  <option value="all">全部</option>
+                  <option value="online">在线</option>
+                  <option value="offline">离线</option>
+                  <option value="attention">需处理</option>
+                </select>
+              </div>
+              <div id="nodeList" class="node-list"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <aside id="detailPane" class="detail-pane">
+        <button id="closeDetailBtn" class="icon-button close" title="关闭">×</button>
+        <div id="detailContent" class="detail-content">
+          <p class="empty-detail">选择一个节点或任务查看详情。</p>
+        </div>
+      </aside>
+
+      <nav class="bottom-nav" aria-label="移动端导航">
+        <button class="bottom-item active" data-view="overview">⌘<span>概览</span></button>
+        <button class="bottom-item" data-view="nodes">▣<span>节点</span></button>
+        <button class="bottom-item" data-view="attention">!<span>待处理</span></button>
+        <button class="bottom-item" data-view="settings">⚙<span>设置</span></button>
+      </nav>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

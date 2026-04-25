@@ -1,0 +1,9 @@
+# No-domain mode: public IP over plain HTTP.
+# Replace YOUR_SERVER_IP with your server public IP, or use :80 to listen on all hosts.
+#
+# This is easy to test, but not recommended for production because tokens travel over HTTP.
+
+YOUR_SERVER_IP:80 {
+  encode gzip
+  reverse_proxy 127.0.0.1:8787
+}

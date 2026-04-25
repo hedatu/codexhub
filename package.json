@@ -1,0 +1,32 @@
+{
+  "name": "codexhub",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Cloud relay dashboard for multiple Farfield/Codex desktop nodes.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hedatu/codexhub.git"
+  },
+  "homepage": "https://github.com/hedatu/codexhub#readme",
+  "keywords": [
+    "codex",
+    "farfield",
+    "dashboard",
+    "pwa",
+    "remote-control",
+    "caddy",
+    "rustdesk-inspired"
+  ],
+  "scripts": {
+    "start": "node src/server/cloud-server.mjs",
+    "dev:server": "node --watch src/server/cloud-server.mjs",
+    "agent": "node src/desktop-agent/agent.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
