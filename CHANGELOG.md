@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0
+
+- Added Linux desktop agent installer and uninstaller with systemd user services.
+- Added macOS desktop agent installer and uninstaller with LaunchAgents.
+- Added Android Trusted Web Activity packaging materials.
+- Added `/tv.html` large-screen operations dashboard for fleet display.
+- Install profile API now returns Windows, Linux, and macOS commands.
+- Release packaging now emits Windows, Linux, macOS, Android TWA, server, and source bundles.
+
 ## v0.1.1
 
 - Fixed Windows scheduled task registration for standard interactive users.

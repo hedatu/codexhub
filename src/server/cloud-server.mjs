@@ -143,13 +143,27 @@ function getPublicBaseUrl(req) {
 
 function buildInstallProfile(req) {
   const publicBaseUrl = getPublicBaseUrl(req);
-  const desktopCommand = [
+  const windowsCommand = [
     "powershell -ExecutionPolicy Bypass -File .\\scripts\\install-desktop-agent.ps1",
     `  -Server "${publicBaseUrl}"`,
     `  -InstallKey "${INSTALL_KEY}"`,
     '  -NodeId "TMT1"',
     '  -NodeName "TMT1"',
   ].join(" `\n");
+  const linuxCommand = [
+    "bash ./scripts/install-linux-agent.sh",
+    `  --server "${publicBaseUrl}"`,
+    `  --install-key "${INSTALL_KEY}"`,
+    '  --node-id "$(hostname)"',
+    '  --node-name "$(hostname)"',
+  ].join(" \\\n");
+  const macosCommand = [
+    "bash ./scripts/install-macos-agent.sh",
+    `  --server "${publicBaseUrl}"`,
+    `  --install-key "${INSTALL_KEY}"`,
+    '  --node-id "$(scutil --get ComputerName)"',
+    '  --node-name "$(scutil --get ComputerName)"',
+  ].join(" \\\n");
 
   return {
     ok: true,
@@ -157,7 +171,10 @@ function buildInstallProfile(req) {
     adminToken: ADMIN_TOKEN,
     installKey: INSTALL_KEY,
     desktop: {
-      powershell: desktopCommand,
+      powershell: windowsCommand,
+      windows: windowsCommand,
+      linux: linuxCommand,
+      macos: macosCommand,
     },
     mobile: {
       serverUrl: publicBaseUrl,

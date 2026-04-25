@@ -1,5 +1,5 @@
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open("codexhub-v1").then((cache) => cache.addAll(["/", "/styles.css", "/app.js", "/manifest.webmanifest"])));
+  event.waitUntil(caches.open("codexhub-v2").then((cache) => cache.addAll(["/", "/tv.html", "/styles.css", "/app.js", "/tv.js", "/manifest.webmanifest"])));
 });
 
 self.addEventListener("fetch", (event) => {

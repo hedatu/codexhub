@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#172331" />
+    <title>CodexHub 大屏看板</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="tv-body">
+    <main class="tv-shell">
+      <header class="tv-header">
+        <div>
+          <p class="eyebrow">CodexHub operations wall</p>
+          <h1>Codex 大屏看板</h1>
+        </div>
+        <div class="tv-clock">
+          <strong id="tvClock">--:--:--</strong>
+          <span id="tvSync">等待同步</span>
+        </div>
+      </header>
+
+      <section id="tvLogin" class="tv-login hidden">
+        <div class="login-card">
+          <h2>连接控制台</h2>
+          <p>大屏页复用手机端访问令牌。输入一次后会保存在当前浏览器。</p>
+          <label>
+            <span>服务器地址</span>
+            <input id="tvServerInput" type="url" placeholder="https://codex.915500.xyz" />
+          </label>
+          <label>
+            <span>访问令牌</span>
+            <input id="tvTokenInput" type="password" placeholder="ADMIN_TOKEN" />
+          </label>
+          <button id="tvSaveBtn" class="primary-button">连接</button>
+        </div>
+      </section>
+
+      <section id="tvContent" class="tv-content hidden">
+        <div class="tv-metrics">
+          <article><span>在线</span><strong id="tvOnline">0/0</strong></article>
+          <article><span>运行中</span><strong id="tvRunning">0</strong></article>
+          <article><span>待回复</span><strong id="tvReply">0</strong></article>
+          <article><span>待审批</span><strong id="tvApproval">0</strong></article>
+          <article><span>今日线程更新</span><strong id="tvToday">0</strong></article>
+          <article><span>总线程</span><strong id="tvThreads">0</strong></article>
+        </div>
+
+        <div class="tv-layout">
+          <section class="tv-panel">
+            <div class="section-head compact">
+              <div>
+                <h2>节点矩阵</h2>
+                <p id="tvNodeHint">等待节点上报</p>
+              </div>
+            </div>
+            <div id="tvNodes" class="tv-node-grid"></div>
+          </section>
+
+          <section class="tv-panel">
+            <div class="section-head compact">
+              <div>
+                <h2>实时队列</h2>
+                <p>运行中、待回复、待审批</p>
+              </div>
+            </div>
+            <div id="tvQueue" class="tv-queue"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/tv.js"></script>
+  </body>
+</html>

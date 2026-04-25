@@ -1,0 +1,30 @@
+{
+  "packageId": "com.hedatu.codexhub",
+  "host": "codex.915500.xyz",
+  "name": "CodexHub",
+  "launcherName": "CodexHub",
+  "display": "standalone",
+  "themeColor": "#336289",
+  "themeColorDark": "#172331",
+  "navigationColor": "#ffffff",
+  "navigationColorDark": "#172331",
+  "backgroundColor": "#f8f9fd",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://codex.915500.xyz/icon.svg",
+  "maskableIconUrl": "https://codex.915500.xyz/icon.svg",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./codexhub-release.keystore",
+    "alias": "codexhub"
+  },
+  "appVersionName": "0.2.0",
+  "appVersionCode": 2,
+  "shortcuts": [
+    {
+      "name": "大屏看板",
+      "shortName": "大屏",
+      "url": "/tv.html"
+    }
+  ]
+}

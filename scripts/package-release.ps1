@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.1.0"
+  [string]$Version = "0.2.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +20,7 @@ $common = @(
   "src",
   "public",
   "scripts",
+  "android",
   "deploy",
   "docs"
 )
@@ -51,6 +52,7 @@ Copy-Items @(
   "src\server",
   "public",
   "scripts\install-server.sh",
+  "android",
   "deploy",
   "docs"
 ) $serverDir
@@ -77,6 +79,39 @@ if (Get-Command go.exe -ErrorAction SilentlyContinue) {
   Write-Warning "go.exe was not found; Windows agent package will not include scripts\windows\codex-wrapper.exe."
 }
 Compress-Archive -Path (Join-Path $agentDir "*") -DestinationPath (Join-Path $dist "codexhub-windows-agent-v$Version.zip") -Force
+
+$linuxAgentDir = Join-Path $stage "codexhub-linux-agent-v$Version"
+Copy-Items @(
+  "package.json",
+  "README.md",
+  "LICENSE",
+  "src\desktop-agent",
+  "scripts\install-linux-agent.sh",
+  "scripts\uninstall-linux-agent.sh",
+  "docs"
+) $linuxAgentDir
+Compress-Archive -Path (Join-Path $linuxAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-linux-agent-v$Version.zip") -Force
+
+$macosAgentDir = Join-Path $stage "codexhub-macos-agent-v$Version"
+Copy-Items @(
+  "package.json",
+  "README.md",
+  "LICENSE",
+  "src\desktop-agent",
+  "scripts\install-macos-agent.sh",
+  "scripts\uninstall-macos-agent.sh",
+  "docs"
+) $macosAgentDir
+Compress-Archive -Path (Join-Path $macosAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-macos-agent-v$Version.zip") -Force
+
+$androidDir = Join-Path $stage "codexhub-android-twa-v$Version"
+Copy-Items @(
+  "README.md",
+  "LICENSE",
+  "android",
+  "docs\ANDROID_APP.md"
+) $androidDir
+Compress-Archive -Path (Join-Path $androidDir "*") -DestinationPath (Join-Path $dist "codexhub-android-twa-v$Version.zip") -Force
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 Get-ChildItem -LiteralPath $dist -File | Select-Object Name,Length

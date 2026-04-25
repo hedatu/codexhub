@@ -2,7 +2,9 @@
   "name": "CodexHub",
   "short_name": "CodexHub",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#f8f9fd",
   "theme_color": "#336289",
   "icons": [

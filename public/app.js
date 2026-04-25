@@ -10,6 +10,8 @@ const dom = {
   adminTokenOutput: document.querySelector("#adminTokenOutput"),
   installKeyOutput: document.querySelector("#installKeyOutput"),
   desktopInstallCommand: document.querySelector("#desktopInstallCommand"),
+  linuxInstallCommand: document.querySelector("#linuxInstallCommand"),
+  macosInstallCommand: document.querySelector("#macosInstallCommand"),
   saveConfigBtn: document.querySelector("#saveConfigBtn"),
   settingsBtn: document.querySelector("#settingsBtn"),
   refreshBtn: document.querySelector("#refreshBtn"),
@@ -174,7 +176,9 @@ function renderInstallProfile() {
   dom.mobileServerOutput.value = profile.mobile?.serverUrl ?? profile.serverUrl ?? "";
   dom.adminTokenOutput.value = profile.mobile?.token ?? "";
   dom.installKeyOutput.value = profile.installKey ?? "";
-  dom.desktopInstallCommand.value = profile.desktop?.powershell ?? "";
+  dom.desktopInstallCommand.value = profile.desktop?.windows ?? profile.desktop?.powershell ?? "";
+  dom.linuxInstallCommand.value = profile.desktop?.linux ?? "";
+  dom.macosInstallCommand.value = profile.desktop?.macos ?? "";
 }
 
 function showSettings() {

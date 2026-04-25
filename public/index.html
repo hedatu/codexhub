@@ -41,6 +41,7 @@
             <h1>Codex 控制台</h1>
           </div>
           <div class="top-actions">
+            <a id="tvLink" class="icon-button link-button" href="/tv.html" title="大屏看板">▦</a>
             <button id="refreshBtn" class="icon-button" title="刷新">↻</button>
             <button id="settingsBtn" class="icon-button" title="连接设置">⚙</button>
           </div>
@@ -80,11 +81,21 @@
               <input id="installKeyOutput" readonly />
             </label>
             <label>
-              <span>电脑端安装命令</span>
+              <span>Windows 安装命令</span>
               <textarea id="desktopInstallCommand" readonly></textarea>
+            </label>
+            <label>
+              <span>Linux 安装命令</span>
+              <textarea id="linuxInstallCommand" readonly></textarea>
+            </label>
+            <label>
+              <span>macOS 安装命令</span>
+              <textarea id="macosInstallCommand" readonly></textarea>
             </label>
             <div class="quick-actions">
               <button class="secondary-button" data-copy-target="desktopInstallCommand">复制电脑安装命令</button>
+              <button class="secondary-button" data-copy-target="linuxInstallCommand">复制 Linux 命令</button>
+              <button class="secondary-button" data-copy-target="macosInstallCommand">复制 macOS 命令</button>
               <button class="secondary-button" data-copy-target="adminTokenOutput">复制手机管理密钥</button>
             </div>
           </div>
