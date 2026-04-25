@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.2.1"
+  [string]$Version = "0.3.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +21,7 @@ $common = @(
   "public",
   "scripts",
   "android",
+  "companion",
   "deploy",
   "docs"
 )
@@ -36,6 +37,9 @@ function Copy-Items($items, $target) {
       Copy-Item -LiteralPath $src -Destination $destParent -Recurse -Force
     }
   }
+  Get-ChildItem -LiteralPath $target -Recurse -Directory -Force |
+    Where-Object { $_.Name -in @("node_modules", "dist", "out", ".electron-gyp") } |
+    Remove-Item -Recurse -Force
 }
 
 $sourceDir = Join-Path $stage "codexhub-source-v$Version"
@@ -112,6 +116,16 @@ Copy-Items @(
   "docs\ANDROID_APP.md"
 ) $androidDir
 Compress-Archive -Path (Join-Path $androidDir "*") -DestinationPath (Join-Path $dist "codexhub-android-twa-v$Version.zip") -Force
+
+$companionDir = Join-Path $stage "codexhub-companion-v$Version"
+Copy-Items @(
+  "README.md",
+  "LICENSE",
+  "companion\desktop",
+  "scripts\build-companion.ps1",
+  "docs\PLATFORM_SUPPORT.md"
+) $companionDir
+Compress-Archive -Path (Join-Path $companionDir "*") -DestinationPath (Join-Path $dist "codexhub-companion-v$Version.zip") -Force
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 Get-ChildItem -LiteralPath $dist -File | Select-Object Name,Length

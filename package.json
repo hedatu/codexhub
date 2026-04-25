@@ -1,6 +1,6 @@
 {
   "name": "codexhub",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "Cloud relay dashboard for multiple Farfield/Codex desktop nodes.",
@@ -24,7 +24,9 @@
     "dev:server": "node --watch src/server/cloud-server.mjs",
     "agent": "node src/desktop-agent/agent.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1"
+    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1",
+    "build:companion": "powershell -ExecutionPolicy Bypass -File scripts/build-companion.ps1",
+    "build:android": "powershell -ExecutionPolicy Bypass -File scripts/build-android-twa.ps1"
   },
   "engines": {
     "node": ">=20"

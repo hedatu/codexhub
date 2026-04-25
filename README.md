@@ -102,6 +102,14 @@ Android app:
 
 CodexHub can be packaged as a Trusted Web Activity. See `docs/ANDROID_APP.md` and `android/twa-manifest.json`.
 
+Tray companion:
+
+CodexHub Companion is an optional Electron tray/menu-bar app. It can start or stop local services, open the web console, open the TV dashboard, and show the local agent config path.
+
+```bash
+npm run build:companion
+```
+
 ### RustDesk-Style Enrollment
 
 CodexHub uses three credentials:
@@ -116,12 +124,13 @@ After installation, each computer only uses its own `nodeKey`. You can rotate or
 
 Release assets:
 
-- `codexhub-server-v0.2.0.zip`
-- `codexhub-windows-agent-v0.2.0.zip`
-- `codexhub-linux-agent-v0.2.0.zip`
-- `codexhub-macos-agent-v0.2.0.zip`
-- `codexhub-android-twa-v0.2.0.zip`
-- `codexhub-source-v0.2.0.zip`
+- `codexhub-server-v0.3.0.zip`
+- `codexhub-windows-agent-v0.3.0.zip`
+- `codexhub-linux-agent-v0.3.0.zip`
+- `codexhub-macos-agent-v0.3.0.zip`
+- `codexhub-android-twa-v0.3.0.zip`
+- `codexhub-companion-v0.3.0.zip`
+- `codexhub-source-v0.3.0.zip`
 
 ### Acknowledgements
 
@@ -227,6 +236,14 @@ bash ./scripts/install-macos-agent.sh \
 
 CodexHub 可以打包为 TWA 安卓应用，配置在 `android/twa-manifest.json`，说明见 `docs/ANDROID_APP.md`。
 
+托盘伴随程序：
+
+CodexHub Companion 是可选的 Electron 托盘/菜单栏程序。它可以启动或停止本机服务、打开网页控制台、打开大屏看板，并显示本机 agent 配置位置。
+
+```bash
+npm run build:companion
+```
+
 ### RustDesk 式接入模型
 
 CodexHub 使用三类凭据：
@@ -241,12 +258,13 @@ CodexHub 使用三类凭据：
 
 Release 包：
 
-- `codexhub-server-v0.2.0.zip`
-- `codexhub-windows-agent-v0.2.0.zip`
-- `codexhub-linux-agent-v0.2.0.zip`
-- `codexhub-macos-agent-v0.2.0.zip`
-- `codexhub-android-twa-v0.2.0.zip`
-- `codexhub-source-v0.2.0.zip`
+- `codexhub-server-v0.3.0.zip`
+- `codexhub-windows-agent-v0.3.0.zip`
+- `codexhub-linux-agent-v0.3.0.zip`
+- `codexhub-macos-agent-v0.3.0.zip`
+- `codexhub-android-twa-v0.3.0.zip`
+- `codexhub-companion-v0.3.0.zip`
+- `codexhub-source-v0.3.0.zip`
 
 ### 致谢
 

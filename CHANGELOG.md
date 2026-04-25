@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.0
+
+- Added CodexHub Companion, an Electron tray/menu-bar app for Windows, macOS, and Linux.
+- Companion can open the web console, open the TV dashboard, inspect local agent config, and start/stop local services.
+- Added PowerShell build scripts for the companion app and Android TWA package.
+- Release packaging now includes a companion source bundle.
+
 ## v0.2.1
 
 - Added `CODEXHUB_PUBLIC_URL` so generated desktop install commands stay correct behind multi-hop HTTPS reverse proxies.
