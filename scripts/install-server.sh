@@ -9,11 +9,6 @@ PUBLIC_URL="${CODEXHUB_PUBLIC_URL:-}"
 ADMIN_TOKEN="${CODEXHUB_ADMIN_TOKEN:-$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
 INSTALL_KEY="${CODEXHUB_INSTALL_KEY:-$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js 20+ is required. Install Node.js first." >&2
-  exit 1
-fi
-
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this script as root so it can create a systemd service." >&2
   exit 1
@@ -40,6 +35,32 @@ EOF_ENV
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) GO_ARCH="amd64" ;;
+  aarch64|arm64) GO_ARCH="arm64" ;;
+  i386|i686) GO_ARCH="386" ;;
+  *) GO_ARCH="" ;;
+esac
+
+SERVER_EXEC=""
+if [ -n "$GO_ARCH" ] && [ -x "$INSTALL_DIR/bin/codexhub-server-linux-$GO_ARCH" ]; then
+  SERVER_EXEC="$INSTALL_DIR/bin/codexhub-server-linux-$GO_ARCH"
+elif [ -x "$INSTALL_DIR/bin/codexhub-server" ]; then
+  SERVER_EXEC="$INSTALL_DIR/bin/codexhub-server"
+fi
+
+if [ -n "$SERVER_EXEC" ]; then
+  chmod +x "$SERVER_EXEC"
+  EXEC_START="$SERVER_EXEC"
+else
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js 20+ is required when the Go server binary is not packaged." >&2
+    exit 1
+  fi
+  EXEC_START="$(command -v node) $INSTALL_DIR/src/server/cloud-server.mjs"
+fi
+
 cat > /etc/systemd/system/codexhub.service <<EOF_SERVICE
 [Unit]
 Description=CodexHub cloud server
@@ -51,7 +72,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/codexhub.env
-ExecStart=$(command -v node) $INSTALL_DIR/src/server/cloud-server.mjs
+ExecStart=$EXEC_START
 Restart=always
 RestartSec=3
 

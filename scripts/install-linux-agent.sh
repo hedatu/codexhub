@@ -30,11 +30,6 @@ if [ -z "$SERVER" ] || [ -z "$INSTALL_KEY" ]; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js 20+ is required." >&2
-  exit 1
-fi
-
 if [ "$NO_FARFIELD" -eq 0 ] && ! command -v npx >/dev/null 2>&1; then
   echo "npx is required to run Farfield." >&2
   exit 1
@@ -43,9 +38,27 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_SOURCE="$REPO_ROOT/src/desktop-agent/agent.mjs"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) GO_ARCH="amd64" ;;
+  aarch64|arm64) GO_ARCH="arm64" ;;
+  i386|i686) GO_ARCH="386" ;;
+  *) GO_ARCH="" ;;
+esac
 
-mkdir -p "$INSTALL_DIR/src/desktop-agent" "$CONFIG_DIR"
-cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
+mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR"
+AGENT_BIN=""
+if [ -n "$GO_ARCH" ] && [ -f "$REPO_ROOT/bin/codexhub-agent-linux-$GO_ARCH" ]; then
+  AGENT_BIN="$INSTALL_DIR/bin/codexhub-agent"
+  cp "$REPO_ROOT/bin/codexhub-agent-linux-$GO_ARCH" "$AGENT_BIN"
+  chmod +x "$AGENT_BIN"
+else
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js 20+ is required when the Go agent binary is not packaged." >&2
+    exit 1
+  fi
+  cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
+fi
 
 CONFIG_PATH="$CONFIG_DIR/agent.json"
 cat > "$CONFIG_PATH" <<EOF_JSON
@@ -63,11 +76,10 @@ chmod 600 "$CONFIG_PATH"
 
 if [ "$NO_SYSTEMD" -eq 0 ]; then
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo "systemctl not found; installed files only. Run with node manually." >&2
+    echo "systemctl not found; installed files only." >&2
   else
     USER_SYSTEMD="$HOME/.config/systemd/user"
     mkdir -p "$USER_SYSTEMD"
-    NODE_BIN="$(command -v node)"
     NPX_BIN="$(command -v npx || true)"
     CODEX_BIN="$(command -v codex || true)"
 
@@ -91,6 +103,13 @@ WantedBy=default.target
 EOF_SERVICE
     fi
 
+    if [ -n "$AGENT_BIN" ]; then
+      AGENT_EXEC="$AGENT_BIN --config $CONFIG_PATH"
+    else
+      NODE_BIN="$(command -v node)"
+      AGENT_EXEC="$NODE_BIN $INSTALL_DIR/src/desktop-agent/agent.mjs --config $CONFIG_PATH"
+    fi
+
     cat > "$USER_SYSTEMD/codexhub-agent.service" <<EOF_SERVICE
 [Unit]
 Description=CodexHub desktop agent
@@ -99,7 +118,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$NODE_BIN $INSTALL_DIR/src/desktop-agent/agent.mjs --config $CONFIG_PATH
+ExecStart=$AGENT_EXEC
 Restart=always
 RestartSec=3
 

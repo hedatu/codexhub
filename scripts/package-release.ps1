@@ -1,1 +1,207 @@
-cGFyYW0oCiAgW3N0cmluZ10kVmVyc2lvbiA9ICIwLjMuNCIKKQoNCiRFcnJvckFjdGlvblByZWZlcmVuY2UgPSAiU3RvcCINCg0KJHJvb3QgPSBSZXNvbHZlLVBhdGggKEpvaW4tUGF0aCAkUFNTY3JpcHRSb290ICIuLiIpDQokZGlzdCA9IEpvaW4tUGF0aCAkcm9vdCAiZGlzdCINCiRzdGFnZSA9IEpvaW4tUGF0aCAkZGlzdCAiX3N0YWdlIg0KDQpSZW1vdmUtSXRlbSAtTGl0ZXJhbFBhdGggJGRpc3QgLVJlY3Vyc2UgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlDQpOZXctSXRlbSAtSXRlbVR5cGUgRGlyZWN0b3J5IC1Gb3JjZSAtUGF0aCAkZGlzdCwgJHN0YWdlIHwgT3V0LU51bGwNCg0KJGNvbW1vbiA9IEAoDQogICJwYWNrYWdlLmpzb24iLA0KICAiUkVBRE1FLm1kIiwNCiAgIkxJQ0VOU0UiLA0KICAiQ0hBTkdFTE9HLm1kIiwNCiAgIi5lbnYuZXhhbXBsZSIsDQogICJzcmMiLA0KICAicHVibGljIiwNCiAgInNjcmlwdHMiLAogICJhbmRyb2lkIiwKICAiY29tcGFuaW9uIiwKICAiZGVwbG95IiwKICAiZG9jcyIKKQoNCmZ1bmN0aW9uIENvcHktSXRlbXMoJGl0ZW1zLCAkdGFyZ2V0KSB7CiAgTmV3LUl0ZW0gLUl0ZW1UeXBlIERpcmVjdG9yeSAtRm9yY2UgLVBhdGggJHRhcmdldCB8IE91dC1OdWxsCiAgZm9yZWFjaCAoJGl0ZW0gaW4gJGl0ZW1zKSB7CiAgICAkc3JjID0gSm9pbi1QYXRoICRyb290ICRpdGVtCiAgICBpZiAoVGVzdC1QYXRoIC1MaXRlcmFsUGF0aCAkc3JjKSB7DQogICAgICAkcmVsYXRpdmVQYXJlbnQgPSBTcGxpdC1QYXRoIC1QYXRoICRpdGVtIC1QYXJlbnQNCiAgICAgICRkZXN0UGFyZW50ID0gaWYgKCRyZWxhdGl2ZVBhcmVudCkgeyBKb2luLVBhdGggJHRhcmdldCAkcmVsYXRpdmVQYXJlbnQgfSBlbHNlIHsgJHRhcmdldCB9DQogICAgICBOZXctSXRlbSAtSXRlbVR5cGUgRGlyZWN0b3J5IC1Gb3JjZSAtUGF0aCAkZGVzdFBhcmVudCB8IE91dC1OdWxsDQogICAgICBDb3B5LUl0ZW0gLUxpdGVyYWxQYXRoICRzcmMgLURlc3RpbmF0aW9uICRkZXN0UGFyZW50IC1SZWN1cnNlIC1Gb3JjZQogICAgfQogIH0KICBHZXQtQ2hpbGRJdGVtIC1MaXRlcmFsUGF0aCAkdGFyZ2V0IC1SZWN1cnNlIC1EaXJlY3RvcnkgLUZvcmNlIHwKICAgIFdoZXJlLU9iamVjdCB7ICRfLk5hbWUgLWluIEAoIm5vZGVfbW9kdWxlcyIsICJkaXN0IiwgIm91dCIsICIuZWxlY3Ryb24tZ3lwIikgfSB8CiAgICBSZW1vdmUtSXRlbSAtUmVjdXJzZSAtRm9yY2UKfQoNCiRzb3VyY2VEaXIgPSBKb2luLVBhdGggJHN0YWdlICJjb2RleGh1Yi1zb3VyY2UtdiRWZXJzaW9uIg0KQ29weS1JdGVtcyAkY29tbW9uICRzb3VyY2VEaXINCkNvbXByZXNzLUFyY2hpdmUgLVBhdGggKEpvaW4tUGF0aCAkc291cmNlRGlyICIqIikgLURlc3RpbmF0aW9uUGF0aCAoSm9pbi1QYXRoICRkaXN0ICJjb2RleGh1Yi1zb3VyY2UtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQ0KDQokc2VydmVyRGlyID0gSm9pbi1QYXRoICRzdGFnZSAiY29kZXhodWItc2VydmVyLXYkVmVyc2lvbiINCkNvcHktSXRlbXMgQCgNCiAgInBhY2thZ2UuanNvbiIsDQogICJSRUFETUUubWQiLA0KICAiTElDRU5TRSIsDQogICJDSEFOR0VMT0cubWQiLA0KICAiLmVudi5leGFtcGxlIiwNCiAgInNyY1xzZXJ2ZXIiLA0KICAicHVibGljIiwKICAic2NyaXB0c1xpbnN0YWxsLXNlcnZlci5zaCIsCiAgImFuZHJvaWQiLAogICJkZXBsb3kiLAogICJkb2NzIgopICRzZXJ2ZXJEaXIKQ29tcHJlc3MtQXJjaGl2ZSAtUGF0aCAoSm9pbi1QYXRoICRzZXJ2ZXJEaXIgIioiKSAtRGVzdGluYXRpb25QYXRoIChKb2luLVBhdGggJGRpc3QgImNvZGV4aHViLXNlcnZlci12JFZlcnNpb24uemlwIikgLUZvcmNlDQoNCiRhZ2VudERpciA9IEpvaW4tUGF0aCAkc3RhZ2UgImNvZGV4aHViLXdpbmRvd3MtYWdlbnQtdiRWZXJzaW9uIg0KQ29weS1JdGVtcyBAKA0KICAicGFja2FnZS5qc29uIiwNCiAgIlJFQURNRS5tZCIsDQogICJMSUNFTlNFIiwNCiAgInNyY1xkZXNrdG9wLWFnZW50IiwNCiAgInNjcmlwdHNcaW5zdGFsbC1kZXNrdG9wLWFnZW50LnBzMSIsDQogICJzY3JpcHRzXHVuaW5zdGFsbC1kZXNrdG9wLWFnZW50LnBzMSIsDQogICJzY3JpcHRzXHdpbmRvd3NcY29kZXgtd3JhcHBlci5nbyIsDQogICJkb2NzIg0KKSAkYWdlbnREaXINCiR3cmFwcGVyU291cmNlID0gSm9pbi1QYXRoICRyb290ICJzY3JpcHRzXHdpbmRvd3NcY29kZXgtd3JhcHBlci5nbyINCiR3cmFwcGVyVGFyZ2V0RGlyID0gSm9pbi1QYXRoICRhZ2VudERpciAic2NyaXB0c1x3aW5kb3dzIg0KJHdyYXBwZXJUYXJnZXQgPSBKb2luLVBhdGggJHdyYXBwZXJUYXJnZXREaXIgImNvZGV4LXdyYXBwZXIuZXhlIg0KaWYgKEdldC1Db21tYW5kIGdvLmV4ZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSkgew0KICBOZXctSXRlbSAtSXRlbVR5cGUgRGlyZWN0b3J5IC1Gb3JjZSAtUGF0aCAkd3JhcHBlclRhcmdldERpciB8IE91dC1OdWxsDQogICYgZ28gYnVpbGQgLW8gJHdyYXBwZXJUYXJnZXQgJHdyYXBwZXJTb3VyY2UNCn0gZWxzZWlmICgtbm90IChUZXN0LVBhdGggLUxpdGVyYWxQYXRoICR3cmFwcGVyVGFyZ2V0KSkgew0KICBXcml0ZS1XYXJuaW5nICJnby5leGUgd2FzIG5vdCBmb3VuZDsgV2luZG93cyBhZ2VudCBwYWNrYWdlIHdpbGwgbm90IGluY2x1ZGUgc2NyaXB0c1x3aW5kb3dzXGNvZGV4LXdyYXBwZXIuZXhlLiINCn0NCkNvbXByZXNzLUFyY2hpdmUgLVBhdGggKEpvaW4tUGF0aCAkYWdlbnREaXIgIioiKSAtRGVzdGluYXRpb25QYXRoIChKb2luLVBhdGggJGRpc3QgImNvZGV4aHViLXdpbmRvd3MtYWdlbnQtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQoKJGxpbnV4QWdlbnREaXIgPSBKb2luLVBhdGggJHN0YWdlICJjb2RleGh1Yi1saW51eC1hZ2VudC12JFZlcnNpb24iCkNvcHktSXRlbXMgQCgKICAicGFja2FnZS5qc29uIiwKICAiUkVBRE1FLm1kIiwKICAiTElDRU5TRSIsCiAgInNyY1xkZXNrdG9wLWFnZW50IiwKICAic2NyaXB0c1xpbnN0YWxsLWxpbnV4LWFnZW50LnNoIiwKICAic2NyaXB0c1x1bmluc3RhbGwtbGludXgtYWdlbnQuc2giLAogICJkb2NzIgopICRsaW51eEFnZW50RGlyCkNvbXByZXNzLUFyY2hpdmUgLVBhdGggKEpvaW4tUGF0aCAkbGludXhBZ2VudERpciAiKiIpIC1EZXN0aW5hdGlvblBhdGggKEpvaW4tUGF0aCAkZGlzdCAiY29kZXhodWItbGludXgtYWdlbnQtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQoKJG1hY29zQWdlbnREaXIgPSBKb2luLVBhdGggJHN0YWdlICJjb2RleGh1Yi1tYWNvcy1hZ2VudC12JFZlcnNpb24iCkNvcHktSXRlbXMgQCgKICAicGFja2FnZS5qc29uIiwKICAiUkVBRE1FLm1kIiwKICAiTElDRU5TRSIsCiAgInNyY1xkZXNrdG9wLWFnZW50IiwKICAic2NyaXB0c1xpbnN0YWxsLW1hY29zLWFnZW50LnNoIiwKICAic2NyaXB0c1x1bmluc3RhbGwtbWFjb3MtYWdlbnQuc2giLAogICJkb2NzIgopICRtYWNvc0FnZW50RGlyCkNvbXByZXNzLUFyY2hpdmUgLVBhdGggKEpvaW4tUGF0aCAkbWFjb3NBZ2VudERpciAiKiIpIC1EZXN0aW5hdGlvblBhdGggKEpvaW4tUGF0aCAkZGlzdCAiY29kZXhodWItbWFjb3MtYWdlbnQtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQoKJGFuZHJvaWREaXIgPSBKb2luLVBhdGggJHN0YWdlICJjb2RleGh1Yi1hbmRyb2lkLXR3YS12JFZlcnNpb24iCkNvcHktSXRlbXMgQCgKICAiUkVBRE1FLm1kIiwKICAiTElDRU5TRSIsCiAgImFuZHJvaWQiLAogICJkb2NzXEFORFJPSURfQVBQLm1kIgopICRhbmRyb2lkRGlyCkNvbXByZXNzLUFyY2hpdmUgLVBhdGggKEpvaW4tUGF0aCAkYW5kcm9pZERpciAiKiIpIC1EZXN0aW5hdGlvblBhdGggKEpvaW4tUGF0aCAkZGlzdCAiY29kZXhodWItYW5kcm9pZC10d2EtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQoKJGNvbXBhbmlvbkRpciA9IEpvaW4tUGF0aCAkc3RhZ2UgImNvZGV4aHViLWNvbXBhbmlvbi12JFZlcnNpb24iCkNvcHktSXRlbXMgQCgKICAiUkVBRE1FLm1kIiwKICAiTElDRU5TRSIsCiAgImNvbXBhbmlvblxkZXNrdG9wIiwKICAic2NyaXB0c1xidWlsZC1jb21wYW5pb24ucHMxIiwKICAiZG9jc1xQTEFURk9STV9TVVBQT1JULm1kIgopICRjb21wYW5pb25EaXIKQ29tcHJlc3MtQXJjaGl2ZSAtUGF0aCAoSm9pbi1QYXRoICRjb21wYW5pb25EaXIgIioiKSAtRGVzdGluYXRpb25QYXRoIChKb2luLVBhdGggJGRpc3QgImNvZGV4aHViLWNvbXBhbmlvbi12JFZlcnNpb24uemlwIikgLUZvcmNlCgokY29tcGFuaW9uV2luVW5wYWNrZWQgPSBKb2luLVBhdGggJHJvb3QgImNvbXBhbmlvblxkZXNrdG9wXGRpc3Rcd2luLXVucGFja2VkIgppZiAoVGVzdC1QYXRoIC1MaXRlcmFsUGF0aCAkY29tcGFuaW9uV2luVW5wYWNrZWQpIHsKICBDb21wcmVzcy1BcmNoaXZlIC1QYXRoIChKb2luLVBhdGggJGNvbXBhbmlvbldpblVucGFja2VkICIqIikgLURlc3RpbmF0aW9uUGF0aCAoSm9pbi1QYXRoICRkaXN0ICJjb2RleGh1Yi1jb21wYW5pb24td2luZG93cy14NjQtdiRWZXJzaW9uLnppcCIpIC1Gb3JjZQp9IGVsc2UgewogIFdyaXRlLVdhcm5pbmcgImNvbXBhbmlvblxkZXNrdG9wXGRpc3Rcd2luLXVucGFja2VkIHdhcyBub3QgZm91bmQ7IHNraXBwaW5nIFdpbmRvd3MgeDY0IENvbXBhbmlvbiBwb3J0YWJsZSB6aXAuIgp9CgppZiAoR2V0LUNvbW1hbmQgZ28uZXhlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlKSB7CiAgJiAoSm9pbi1QYXRoICRQU1NjcmlwdFJvb3QgImJ1aWxkLXdpbmRvd3MtY29tcGFuaW9uLWluc3RhbGxlci5wczEiKSAtVmVyc2lvbiAkVmVyc2lvbiAtT3V0cHV0RGlyICRkaXN0Cn0gZWxzZSB7CiAgV3JpdGUtV2FybmluZyAiZ28uZXhlIHdhcyBub3QgZm91bmQ7IHNraXBwaW5nIFdpbmRvd3MgQ29tcGFuaW9uIGluc3RhbGxlciBidWlsZC4iCn0KClJlbW92ZS1JdGVtIC1MaXRlcmFsUGF0aCAkc3RhZ2UgLVJlY3Vyc2UgLUZvcmNlCkdldC1DaGlsZEl0ZW0gLUxpdGVyYWxQYXRoICRkaXN0IC1GaWxlIHwgU2VsZWN0LU9iamVjdCBOYW1lLExlbmd0aAo=
+param(
+  [string]$Version = "0.4.0"
+)
+
+$ErrorActionPreference = "Stop"
+
+$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$dist = Join-Path $root "dist"
+$stage = Join-Path $dist "_stage"
+$androidSigningDir = Join-Path $dist "android"
+$androidSigningBackup = Join-Path ([System.IO.Path]::GetTempPath()) ("codexhub-android-signing-" + [guid]::NewGuid().ToString())
+$androidApkBackup = Join-Path ([System.IO.Path]::GetTempPath()) ("codexhub-android-apks-" + [guid]::NewGuid().ToString())
+
+if (Test-Path -LiteralPath $androidSigningDir) {
+  Copy-Item -LiteralPath $androidSigningDir -Destination $androidSigningBackup -Recurse -Force
+}
+if (Test-Path -LiteralPath $dist) {
+  $androidApks = Get-ChildItem -LiteralPath $dist -Filter "codexhub-android-v*.apk" -File -ErrorAction SilentlyContinue
+  if ($androidApks) {
+    New-Item -ItemType Directory -Force -Path $androidApkBackup | Out-Null
+    $androidApks | Copy-Item -Destination $androidApkBackup -Force
+  }
+}
+Remove-Item -LiteralPath $dist -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $dist, $stage | Out-Null
+if (Test-Path -LiteralPath $androidSigningBackup) {
+  Copy-Item -LiteralPath $androidSigningBackup -Destination $androidSigningDir -Recurse -Force
+  Remove-Item -LiteralPath $androidSigningBackup -Recurse -Force
+}
+if (Test-Path -LiteralPath $androidApkBackup) {
+  Get-ChildItem -LiteralPath $androidApkBackup -File | Copy-Item -Destination $dist -Force
+  Remove-Item -LiteralPath $androidApkBackup -Recurse -Force
+}
+
+$goDist = Join-Path $dist "go"
+if (Get-Command go.exe -ErrorAction SilentlyContinue) {
+  & (Join-Path $PSScriptRoot "build-go.ps1") -Version $Version -OutputDir $goDist
+} else {
+  Write-Warning "go.exe was not found; Go server/agent binaries will not be included."
+}
+
+$common = @(
+  "package.json",
+  "go.mod",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  ".env.example",
+  "cmd",
+  "internal",
+  "src",
+  "public",
+  "scripts",
+  "android",
+  "companion",
+  "deploy",
+  "docs"
+)
+
+function Copy-Items($items, $target) {
+  New-Item -ItemType Directory -Force -Path $target | Out-Null
+  foreach ($item in $items) {
+    $src = Join-Path $root $item
+    if (Test-Path -LiteralPath $src) {
+      $relativeParent = Split-Path -Path $item -Parent
+      $destParent = if ($relativeParent) { Join-Path $target $relativeParent } else { $target }
+      New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+      Copy-Item -LiteralPath $src -Destination $destParent -Recurse -Force
+    }
+  }
+  Get-ChildItem -LiteralPath $target -Recurse -Directory -Force |
+    Where-Object { $_.Name -in @("node_modules", "dist", "out", ".electron-gyp") } |
+    Remove-Item -Recurse -Force
+}
+
+function Copy-GoBinaries($patterns, $target) {
+  if (-not (Test-Path -LiteralPath $goDist)) {
+    return
+  }
+  $binDir = Join-Path $target "bin"
+  New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+  foreach ($pattern in $patterns) {
+    Get-ChildItem -LiteralPath $goDist -Filter $pattern -File -ErrorAction SilentlyContinue |
+      Copy-Item -Destination $binDir -Force
+  }
+}
+
+$sourceDir = Join-Path $stage "codexhub-source-v$Version"
+Copy-Items $common $sourceDir
+Compress-Archive -Path (Join-Path $sourceDir "*") -DestinationPath (Join-Path $dist "codexhub-source-v$Version.zip") -Force
+
+$serverDir = Join-Path $stage "codexhub-server-v$Version"
+Copy-Items @(
+  "package.json",
+  "go.mod",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  ".env.example",
+  "cmd\codexhub-server",
+  "internal",
+  "src\server",
+  "public",
+  "scripts\install-server.sh",
+  "android",
+  "deploy",
+  "docs"
+) $serverDir
+Copy-GoBinaries @("codexhub-server-linux-*", "codexhub-server-windows-*", "codexhub-server-darwin-*") $serverDir
+Compress-Archive -Path (Join-Path $serverDir "*") -DestinationPath (Join-Path $dist "codexhub-server-v$Version.zip") -Force
+
+$agentDir = Join-Path $stage "codexhub-windows-agent-v$Version"
+Copy-Items @(
+  "package.json",
+  "go.mod",
+  "README.md",
+  "LICENSE",
+  "cmd\codexhub-agent",
+  "internal",
+  "src\desktop-agent",
+  "scripts\install-desktop-agent.ps1",
+  "scripts\uninstall-desktop-agent.ps1",
+  "scripts\windows\codex-wrapper.go",
+  "docs"
+) $agentDir
+Copy-GoBinaries @("codexhub-agent-windows-*") $agentDir
+$wrapperSource = Join-Path $root "scripts\windows\codex-wrapper.go"
+$wrapperTargetDir = Join-Path $agentDir "scripts\windows"
+$wrapperTarget = Join-Path $wrapperTargetDir "codex-wrapper.exe"
+if (Get-Command go.exe -ErrorAction SilentlyContinue) {
+  New-Item -ItemType Directory -Force -Path $wrapperTargetDir | Out-Null
+  & go build -tags codexhub_codex_wrapper -o $wrapperTarget $wrapperSource
+} elseif (-not (Test-Path -LiteralPath $wrapperTarget)) {
+  Write-Warning "go.exe was not found; Windows agent package will not include scripts\windows\codex-wrapper.exe."
+}
+Compress-Archive -Path (Join-Path $agentDir "*") -DestinationPath (Join-Path $dist "codexhub-windows-agent-v$Version.zip") -Force
+
+$linuxAgentDir = Join-Path $stage "codexhub-linux-agent-v$Version"
+Copy-Items @(
+  "package.json",
+  "go.mod",
+  "README.md",
+  "LICENSE",
+  "cmd\codexhub-agent",
+  "internal",
+  "src\desktop-agent",
+  "scripts\install-linux-agent.sh",
+  "scripts\uninstall-linux-agent.sh",
+  "docs"
+) $linuxAgentDir
+Copy-GoBinaries @("codexhub-agent-linux-*") $linuxAgentDir
+Compress-Archive -Path (Join-Path $linuxAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-linux-agent-v$Version.zip") -Force
+
+$macosAgentDir = Join-Path $stage "codexhub-macos-agent-v$Version"
+Copy-Items @(
+  "package.json",
+  "go.mod",
+  "README.md",
+  "LICENSE",
+  "cmd\codexhub-agent",
+  "internal",
+  "src\desktop-agent",
+  "scripts\install-macos-agent.sh",
+  "scripts\uninstall-macos-agent.sh",
+  "docs"
+) $macosAgentDir
+Copy-GoBinaries @("codexhub-agent-darwin-*") $macosAgentDir
+Compress-Archive -Path (Join-Path $macosAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-macos-agent-v$Version.zip") -Force
+
+$androidDir = Join-Path $stage "codexhub-android-twa-v$Version"
+Copy-Items @(
+  "README.md",
+  "LICENSE",
+  "android",
+  "docs\ANDROID_APP.md"
+) $androidDir
+Compress-Archive -Path (Join-Path $androidDir "*") -DestinationPath (Join-Path $dist "codexhub-android-twa-v$Version.zip") -Force
+
+$companionDir = Join-Path $stage "codexhub-companion-v$Version"
+Copy-Items @(
+  "README.md",
+  "LICENSE",
+  "companion\desktop",
+  "scripts\build-companion.ps1",
+  "docs\PLATFORM_SUPPORT.md"
+) $companionDir
+Compress-Archive -Path (Join-Path $companionDir "*") -DestinationPath (Join-Path $dist "codexhub-companion-v$Version.zip") -Force
+
+if (Test-Path -LiteralPath $goDist) {
+  Compress-Archive -Path (Join-Path $goDist "*") -DestinationPath (Join-Path $dist "codexhub-go-binaries-v$Version.zip") -Force
+}
+
+$companionWinUnpacked = Join-Path $root "companion\desktop\dist\win-unpacked"
+if (Test-Path -LiteralPath $companionWinUnpacked) {
+  Compress-Archive -Path (Join-Path $companionWinUnpacked "*") -DestinationPath (Join-Path $dist "codexhub-companion-windows-x64-v$Version.zip") -Force
+} else {
+  Write-Warning "companion\desktop\dist\win-unpacked was not found; skipping Windows x64 Companion portable zip."
+}
+
+if (Get-Command go.exe -ErrorAction SilentlyContinue) {
+  & (Join-Path $PSScriptRoot "build-windows-companion-installer.ps1") -Version $Version -OutputDir $dist
+} else {
+  Write-Warning "go.exe was not found; skipping Windows Companion installer build."
+}
+
+Remove-Item -LiteralPath $stage -Recurse -Force
+Get-ChildItem -LiteralPath $dist -File | Select-Object Name,Length

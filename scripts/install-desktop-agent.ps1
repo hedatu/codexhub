@@ -23,18 +23,30 @@ function Resolve-Node {
   return $node.Source
 }
 
-$nodeExe = Resolve-Node
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $agentSource = Join-Path $repoRoot "src\desktop-agent\agent.mjs"
-if (-not (Test-Path -LiteralPath $agentSource)) {
-  throw "Cannot find desktop agent at $agentSource"
+$arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+  "ARM64" { "arm64" }
+  "x86" { "386" }
+  default { "amd64" }
 }
+$goAgentSource = Join-Path $repoRoot "bin\codexhub-agent-windows-$arch.exe"
+$nodeExe = $null
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "src\desktop-agent") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "bin") | Out-Null
 
-Copy-Item -LiteralPath $agentSource -Destination (Join-Path $InstallDir "src\desktop-agent\agent.mjs") -Force
+$agentExe = Join-Path $InstallDir "bin\codexhub-agent.exe"
+if (Test-Path -LiteralPath $goAgentSource) {
+  Copy-Item -LiteralPath $goAgentSource -Destination $agentExe -Force
+} else {
+  if (-not (Test-Path -LiteralPath $agentSource)) {
+    throw "Cannot find desktop agent at $agentSource"
+  }
+  $nodeExe = Resolve-Node
+  Copy-Item -LiteralPath $agentSource -Destination (Join-Path $InstallDir "src\desktop-agent\agent.mjs") -Force
+}
 
 $wrapperSource = Join-Path $repoRoot "scripts\windows\codex-wrapper.exe"
 $wrapperPath = Join-Path $InstallDir "bin\codex-wrapper.exe"
@@ -56,7 +68,13 @@ $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encodi
 
 $agentPath = Join-Path $InstallDir "src\desktop-agent\agent.mjs"
 $taskName = "CodexHubAgent"
-$args = "`"$agentPath`" --config `"$configPath`""
+if (Test-Path -LiteralPath $agentExe) {
+  $agentCommand = $agentExe
+  $args = "--config `"$configPath`""
+} else {
+  $agentCommand = $nodeExe
+  $args = "`"$agentPath`" --config `"$configPath`""
+}
 
 if (-not $NoScheduledTask) {
   $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -74,7 +92,7 @@ if (-not $NoScheduledTask) {
     Start-ScheduledTask -TaskName "CodexHubFarfield" -ErrorAction Stop
   }
 
-  $action = New-ScheduledTaskAction -Execute $nodeExe -Argument $args
+  $action = New-ScheduledTaskAction -Execute $agentCommand -Argument $args
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
   Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
@@ -88,7 +106,7 @@ if (-not $NoFarfield) {
   Write-Host "Farfield: $FarfieldUrl"
 }
 if ($NoScheduledTask) {
-  Write-Host "Run manually: `"$nodeExe`" $args"
+  Write-Host "Run manually: `"$agentCommand`" $args"
 } else {
   Write-Host "Scheduled task: $taskName"
   if (-not $NoFarfield) {

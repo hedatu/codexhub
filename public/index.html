@@ -97,6 +97,7 @@
               <button class="secondary-button" data-copy-target="linuxInstallCommand">复制 Linux 命令</button>
               <button class="secondary-button" data-copy-target="macosInstallCommand">复制 macOS 命令</button>
               <button class="secondary-button" data-copy-target="adminTokenOutput">复制手机管理密钥</button>
+              <button id="rotateInstallKeyBtn" class="danger-button">轮换安装密钥</button>
             </div>
           </div>
         </section>
@@ -129,6 +130,14 @@
                   <p>等待回复、待审批和报错会优先显示</p>
                 </div>
                 <span id="attentionCount" class="pill">0</span>
+              </div>
+              <div class="inbox-toolbar">
+                <div class="segmented" aria-label="消息筛选">
+                  <button class="active" data-inbox-filter="unread">未读</button>
+                  <button data-inbox-filter="read">已读</button>
+                  <button data-inbox-filter="all">全部</button>
+                </div>
+                <button id="markAllReadBtn" class="text-button">全部已读</button>
               </div>
               <div id="attentionList" class="attention-list"></div>
             </div>

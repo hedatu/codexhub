@@ -31,11 +31,6 @@ if [ -z "$SERVER" ] || [ -z "$INSTALL_KEY" ]; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js 20+ is required." >&2
-  exit 1
-fi
-
 if [ "$NO_FARFIELD" -eq 0 ] && ! command -v npx >/dev/null 2>&1; then
   echo "npx is required to run Farfield." >&2
   exit 1
@@ -44,9 +39,26 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_SOURCE="$REPO_ROOT/src/desktop-agent/agent.mjs"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64) GO_ARCH="amd64" ;;
+  aarch64|arm64) GO_ARCH="arm64" ;;
+  *) GO_ARCH="" ;;
+esac
 
-mkdir -p "$INSTALL_DIR/src/desktop-agent" "$CONFIG_DIR" "$LOG_DIR"
-cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
+mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR" "$LOG_DIR"
+AGENT_BIN=""
+if [ -n "$GO_ARCH" ] && [ -f "$REPO_ROOT/bin/codexhub-agent-darwin-$GO_ARCH" ]; then
+  AGENT_BIN="$INSTALL_DIR/bin/codexhub-agent"
+  cp "$REPO_ROOT/bin/codexhub-agent-darwin-$GO_ARCH" "$AGENT_BIN"
+  chmod +x "$AGENT_BIN"
+else
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js 20+ is required when the Go agent binary is not packaged." >&2
+    exit 1
+  fi
+  cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
+fi
 
 CONFIG_PATH="$CONFIG_DIR/agent.json"
 cat > "$CONFIG_PATH" <<EOF_JSON
@@ -65,8 +77,15 @@ chmod 600 "$CONFIG_PATH"
 if [ "$NO_LAUNCHD" -eq 0 ]; then
   LAUNCH_DIR="$HOME/Library/LaunchAgents"
   mkdir -p "$LAUNCH_DIR"
-  NODE_BIN="$(command -v node)"
   CODEX_BIN="$(command -v codex || true)"
+  if [ -n "$AGENT_BIN" ]; then
+    AGENT_PROGRAM="$AGENT_BIN"
+    AGENT_ARGS=""
+  else
+    NODE_BIN="$(command -v node)"
+    AGENT_PROGRAM="$NODE_BIN"
+    AGENT_ARGS="<string>$INSTALL_DIR/src/desktop-agent/agent.mjs</string>"
+  fi
 
   if [ "$NO_FARFIELD" -eq 0 ]; then
     cat > "$LAUNCH_DIR/com.codexhub.farfield.plist" <<EOF_PLIST
@@ -94,8 +113,8 @@ EOF_PLIST
 <plist version="1.0"><dict>
   <key>Label</key><string>com.codexhub.agent</string>
   <key>ProgramArguments</key><array>
-    <string>$NODE_BIN</string>
-    <string>$INSTALL_DIR/src/desktop-agent/agent.mjs</string>
+    <string>$AGENT_PROGRAM</string>
+    $AGENT_ARGS
     <string>--config</string>
     <string>$CONFIG_PATH</string>
   </array>

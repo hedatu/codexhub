@@ -1,1 +1,62 @@
-IyBDb2RleEh1YiDkuK3mlofor7TmmI4KCkNvZGV4SHViIOaYr+S4gOS4quW8gOa6kOeahCBDb2RleCDkupHmiYvmnLrnq6/nu7zlkIjmjqfliLblj7DvvIznlKjmnaXlnKjmiYvmnLrkuIrmn6XnnIvlkozmjqfliLblpJrlj7Dov5DooYwgQ29kZXggRGVza3RvcCDnmoTnlLXohJHjgIIKCuWug+WfuuS6jiBGYXJmaWVsZCDnmoTmnKzlnLDmnI3liqHog73lipvvvIzlubblj4LogIMgUnVzdERlc2sg55qE4oCc6Ieq5bu65pyN5Yqh5ZmoICsgS2V5IOWKoOWFpSArIOWkmuiuvuWkh+eZu+iusOKAneaooeW8j+OAggoK5qC45b+D6ZO+6Lev77yaCgpgYGB0ZXh0CuaJi+acuua1j+iniOWZqAogIC0+IENvZGV4SHViIOS6keerr+acjeWKoeWZqAogIC0+IOavj+WPsOeUteiEkeS4iueahCBDb2RleEh1YiBhZ2VudAogIC0+IOacrOacuiBGYXJmaWVsZAogIC0+IOacrOacuiBDb2RleCBEZXNrdG9wCmBgYAoK6aaZ5riv5pyN5Yqh5Zmo5Y+q6LSf6LSj54q25oCB6IGa5ZCI44CB572R6aG15o6n5Yi25Y+w5ZKM5ZG95Luk6Zif5YiX77yb5q+P5Y+w55S16ISR5Li75Yqo6L+e5o6l5pyN5Yqh5Zmo77yM5LiN6ZyA6KaB5oqK55S16ISR56uv5Y+j5pq06Zyy5Yiw5YWs572R44CCCgojIyDlv6vpgJ/lvIDlp4sKCuacjeWKoeWZqO+8mgoKYGBgYmFzaApzdWRvIGJhc2ggc2NyaXB0cy9pbnN0YWxsLXNlcnZlci5zaApgYGAKCueUteiEkeerr++8mgoKYGBgcG93ZXJzaGVsbApwb3dlcnNoZWxsIC1FeGVjdXRpb25Qb2xpY3kgQnlwYXNzIC1GaWxlIC5cc2NyaXB0c1xpbnN0YWxsLWRlc2t0b3AtYWdlbnQucHMxIGAKICAtU2VydmVyICJodHRwczovL+S9oOeahOacjeWKoeWZqOWfn+WQjSIgYAogIC1JbnN0YWxsS2V5ICLmnI3liqHlmajovpPlh7rnmoQgSU5TVEFMTF9LRVkiIGAKICAtTm9kZUlkICJUTVQxIiBgCiAgLU5vZGVOYW1lICJUTVQxIgpgYGAKCldpbmRvd3MgQ29tcGFuaW9uIOahjOmdouaJmOebmO+8mgoKYGBgcG93ZXJzaGVsbAouXGNvZGV4aHViLWNvbXBhbmlvbi1pbnN0YWxsZXItd2luZG93cy14NjQtdjAuMy40LmV4ZQpgYGAKCui/meS4quWuieijheWZqOS8muWuieijhSBDb21wYW5pb27jgIHlhpnlhaXlvIDmnLrlkK/liqjjgIHliJvlu7rlvIDlp4voj5zljZXlv6vmjbfmlrnlvI/vvIzlubblnKggV2luZG93cyDigJzlupTnlKjlkozlip/og73igJ3ph4zmj5Dkvpvljbjovb3lhaXlj6PjgILmraPlvI/mtojpmaQgU21hcnRTY3JlZW4g5o+Q56S66ZyA6KaB55yf5a6e5Luj56CB562+5ZCN6K+B5Lmm44CCCgrlronljZMgQVBL77yaCgpgYGB0ZXh0CmNvZGV4aHViLWFuZHJvaWQtdjAuMy40LmFwawpgYGAKCui/meS4qiBBUEsg5bey57uP562+5ZCN77yM5Y+v5Lul5ZyoIEFuZHJvaWQgMTQg5LiK55u05o6l5a6J6KOF44CC5pyN5Yqh5Zmo5Lmf5bey57uP6YWN572uIGAud2VsbC1rbm93bi9hc3NldGxpbmtzLmpzb25g77yM55So5LqOIFRXQSDlhajlsY/pqozor4HjgIIKCuaJi+acuuerr++8mgoK5omT5byAIGBodHRwczovL+S9oOeahOacjeWKoeWZqOWfn+WQjWDvvIznlKggYEFETUlOX1RPS0VOYCDnmbvlvZXjgIIKCiMjIOiHtOiwogoKLSDmhJ/osKIgRmFyZmllbGQg6aG555uu5o+Q5L6b6L+c56iL5p+l55yL5ZKM5o6n5Yi2IENvZGV4IOeahOW8gOa6kOWfuuehgOOAggotIOaEn+iwoiBPcGVuQUkgQ29kZXggLyBDb2RleCBEZXNrdG9wIOaPkOS+m+acrOWcsOe8lueoi+aZuuiDveS9k+iDveWKm+OAggotIOaEn+iwoiBSdXN0RGVzayDnmoToh6rlu7rmnI3liqHlmajlkowgS2V5IOWKoOWFpeaooeW8j+e7meS6huacrOmhueebrumDqOe9suS9k+mqjOS4iueahOWQr+WPkeOAggotIOaEn+iwoiBDYWRkeSDmj5DkvpvnroDljZXlj6/pnaDnmoQgSFRUUFMg5Y+N5ZCR5Luj55CG44CCCg==
+# CodexHub 中文说明
+
+CodexHub 是一个开源的 Codex 云手机端综合控制台，用来在手机上查看和控制多台运行 Codex Desktop 的电脑。
+
+它基于 Farfield 的本地服务能力，并参考 RustDesk 的“自建服务器 + Key 加入 + 多设备登记”模式。
+
+核心链路：
+
+```text
+手机浏览器
+  -> CodexHub 云端服务器
+  -> 每台电脑上的 CodexHub agent
+  -> 本机 Farfield
+  -> 本机 Codex Desktop
+```
+
+香港服务器只负责状态聚合、网页控制台和命令队列；每台电脑主动连接服务器，不需要把电脑端口暴露到公网。
+
+## 快速开始
+
+服务器：
+
+```bash
+sudo bash scripts/install-server.sh
+```
+
+电脑端：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
+  -Server "https://你的服务器域名" `
+  -InstallKey "服务器输出的 INSTALL_KEY" `
+  -NodeId "TMT1" `
+  -NodeName "TMT1"
+```
+
+Windows Companion 桌面托盘：
+
+```powershell
+.\codexhub-companion-installer-windows-x64-v0.4.1.exe
+```
+
+这个安装器会安装 Companion、写入开机启动、创建开始菜单快捷方式，并在 Windows “应用和功能”里提供卸载入口。正式消除 SmartScreen 提示需要真实代码签名证书。
+
+安卓 APK：
+
+```text
+codexhub-android-v0.4.0.apk
+```
+
+这个 APK 已经签名，可以在 Android 14 上直接安装。服务器也已经配置 `.well-known/assetlinks.json`，用于 TWA 全屏验证。
+
+手机端：
+
+打开 `https://你的服务器域名`，用 `ADMIN_TOKEN` 登录。
+
+## 致谢
+
+- 感谢 Farfield 项目提供远程查看和控制 Codex 的开源基础。
+- 感谢 OpenAI Codex / Codex Desktop 提供本地编程智能体能力。
+- 感谢 RustDesk 的自建服务器和 Key 加入模式给了本项目部署体验上的启发。
+- 感谢 Caddy 提供简单可靠的 HTTPS 反向代理。

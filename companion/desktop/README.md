@@ -5,10 +5,11 @@ CodexHub Companion is a small tray/menu-bar app for desktop machines.
 It does not replace the desktop agent. It gives the user a visible local control surface:
 
 - show local CodexHub service status;
+- open a local status window with service, Farfield, and cloud self-check details;
 - open the mobile web console;
 - open the large-screen dashboard;
 - start or stop local Farfield and CodexHub agent services;
-- open the local config folder.
+- open the local config and log folders.
 
 ## Development
 
@@ -41,6 +42,14 @@ The Electron Builder config targets:
 Windows 上会控制任务计划里的 `CodexHubFarfield` 和 `CodexHubAgent`。
 macOS 上会控制 LaunchAgents。
 Linux 上会控制 systemd user services。
+
+托盘左键会打开本机状态窗口。状态窗口会显示：
+
+- 本机节点 ID、服务器、配置文件路径；
+- Agent/Farfield 本地服务状态；
+- Farfield `/api/health` 健康状态；
+- 使用本机 `nodeKey` 查询云端 `/api/nodes/:id/self` 的结果；
+- 日志目录和开机启动状态。
 
 Windows 无签名环境下，如果安装包步骤失败，但已经生成 `dist/win-unpacked`，可以把这个目录压缩成便携版。用户解压后直接运行 `CodexHub Companion.exe`。
 

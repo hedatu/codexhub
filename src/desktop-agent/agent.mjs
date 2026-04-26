@@ -19,6 +19,10 @@ const INSTALL_KEY = config.installKey ?? process.env.CODEXHUB_INSTALL_KEY ?? sav
 const FARFIELD_URL = stripSlash(config.farfield ?? process.env.FARFIELD_URL ?? savedConfig.farfieldUrl ?? "http://127.0.0.1:4311");
 const INTERVAL_MS = Number(config.interval ?? process.env.CODEXHUB_INTERVAL_MS ?? 5_000);
 const PROVIDER = config.provider ?? process.env.CODEXHUB_PROVIDER ?? "codex";
+const CODEX_HOME = path.resolve(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
+const SESSION_ROOT = path.join(CODEX_HOME, "sessions");
+const SESSION_CACHE = new Map();
+let sessionFileIndex = null;
 
 function parseArgs(args) {
   const out = {};
@@ -133,12 +137,19 @@ function normalizeFarfieldState(health) {
     socketPath: state.socketPath ?? null,
     appExecutable: state.appExecutable ?? null,
     gitCommit: state.gitCommit ?? null,
+    activeTrace: state.activeTrace ?? null,
   };
 }
 
-function normalizeThreads(sidebar) {
+function farfieldHasNoActiveTrace(health) {
+  const farfieldState = health?.state ?? {};
+  return Object.prototype.hasOwnProperty.call(farfieldState, "activeTrace") && farfieldState.activeTrace == null;
+}
+
+function normalizeThreads(sidebar, health) {
   const rows = sidebar?.rows ?? sidebar?.data ?? sidebar?.threads ?? [];
   if (!Array.isArray(rows)) return [];
+  const clearGenerating = farfieldHasNoActiveTrace(health);
   return rows.map((thread) => ({
     id: String(thread.id ?? ""),
     provider: thread.provider ?? PROVIDER,
@@ -148,10 +159,111 @@ function normalizeThreads(sidebar) {
     source: thread.source ?? "",
     createdAt: thread.createdAt ?? null,
     updatedAt: thread.updatedAt ?? null,
-    isGenerating: Boolean(thread.isGenerating),
+    isGenerating: clearGenerating ? false : Boolean(thread.isGenerating),
     waitingOnApproval: Boolean(thread.waitingOnApproval),
     waitingOnUserInput: Boolean(thread.waitingOnUserInput),
-  })).filter((thread) => thread.id);
+  })).filter((thread) => thread.id).map((thread) => ({
+    ...thread,
+    ...readLatestSessionMessage(thread.id),
+  }));
+}
+
+function buildSessionFileIndex() {
+  const index = new Map();
+  const stack = fs.existsSync(SESSION_ROOT) ? [SESSION_ROOT] : [];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        const match = entry.name.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+        if (match) index.set(match[1], fullPath);
+      }
+    }
+  }
+  return index;
+}
+
+function sessionFileForThread(threadId) {
+  if (!sessionFileIndex) sessionFileIndex = buildSessionFileIndex();
+  return sessionFileIndex.get(threadId) ?? null;
+}
+
+function extractMessageText(payload) {
+  if (payload?.type === "agent_message" && typeof payload.message === "string") {
+    return payload.message;
+  }
+  if (payload?.type !== "message" || payload.role !== "assistant") return "";
+  const parts = Array.isArray(payload.content) ? payload.content : [];
+  return parts
+    .map((part) => typeof part?.text === "string" ? part.text : "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function readLatestSessionMessage(threadId) {
+  const filePath = sessionFileForThread(threadId);
+  if (!filePath) return {};
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return {};
+  }
+  const cached = SESSION_CACHE.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.value;
+  let latestFinal = null;
+  let latestProgress = null;
+  try {
+    const lines = fs.readFileSync(filePath, "utf8").trimEnd().split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (!lines[index]) continue;
+      let event;
+      try {
+        event = JSON.parse(lines[index]);
+      } catch {
+        continue;
+      }
+      const text = extractMessageText(event.payload);
+      if (!text) continue;
+      const phase = event.payload?.phase ?? null;
+      const entry = {
+        text: text.length > 1800 ? `${text.slice(0, 1800)}...` : text,
+        at: event.timestamp ?? null,
+        phase,
+      };
+      if (!latestFinal && phase === "final_answer") {
+        latestFinal = entry;
+      } else if (!latestProgress && phase !== "final_answer") {
+        latestProgress = entry;
+      }
+      if (latestFinal && latestProgress) break;
+    }
+  } catch {
+    latestFinal = null;
+    latestProgress = null;
+  }
+  const preferred = latestFinal ?? latestProgress;
+  const value = preferred ? {
+    latestMessage: preferred.text,
+    latestMessageAt: preferred.at,
+    latestMessagePhase: preferred.phase,
+    latestFinalMessage: latestFinal?.text ?? null,
+    latestFinalMessageAt: latestFinal?.at ?? null,
+    latestProgressMessage: latestProgress?.text ?? null,
+    latestProgressMessageAt: latestProgress?.at ?? null,
+  } : {};
+  SESSION_CACHE.set(filePath, { mtimeMs: stat.mtimeMs, value });
+  return value;
 }
 
 function deriveMetrics(threads) {
@@ -171,7 +283,8 @@ async function collectSnapshot() {
   } catch {
     sidebar = await farfieldJson("/api/unified/threads?limit=80&archived=false&all=true");
   }
-  const threads = normalizeThreads(sidebar);
+  const threads = normalizeThreads(sidebar, health);
+  const farfield = normalizeFarfieldState(health);
   return {
     name: NODE_NAME,
     version: "0.1.0",
@@ -182,10 +295,10 @@ async function collectSnapshot() {
       arch: os.arch(),
     },
     tags: [PROVIDER],
-    farfield: normalizeFarfieldState(health),
+    farfield,
     metrics: deriveMetrics(threads),
     threads,
-    lastError: normalizeFarfieldState(health).lastError,
+    lastError: farfield.lastError,
   };
 }
 
@@ -248,20 +361,24 @@ async function pollCommands() {
   const payload = await getJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/commands/poll?limit=5`, {
     headers: headers(),
   });
+  let processed = 0;
   for (const command of payload.commands ?? []) {
     try {
       const result = await executeCommand(command);
+      processed += 1;
       await postJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/commands/${encodeURIComponent(command.id)}/result`, {
         ok: true,
         result,
       });
     } catch (error) {
+      processed += 1;
       await postJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/commands/${encodeURIComponent(command.id)}/result`, {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
+  return processed;
 }
 
 async function tick() {
@@ -270,7 +387,11 @@ async function tick() {
     const snapshot = await collectSnapshot();
     const result = await postJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/heartbeat`, snapshot);
     if (result.queuedCommands > 0) {
-      await pollCommands();
+      const processed = await pollCommands();
+      if (processed > 0) {
+        const nextSnapshot = await collectSnapshot();
+        await postJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/heartbeat`, nextSnapshot);
+      }
     }
     console.log(`[${new Date().toLocaleTimeString()}] heartbeat ok: ${snapshot.threads.length} threads`);
   } catch (error) {

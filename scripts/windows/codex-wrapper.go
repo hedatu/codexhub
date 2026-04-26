@@ -1,3 +1,6 @@
+//go:build codexhub_codex_wrapper
+// +build codexhub_codex_wrapper
+
 package main
 
 import (

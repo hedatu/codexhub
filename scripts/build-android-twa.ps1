@@ -1,1 +1,197 @@
-cGFyYW0oCiAgW3N0cmluZ10kTWFuaWZlc3QgPSAiJFBTU2NyaXB0Um9vdFwuLlxhbmRyb2lkXHR3YS1tYW5pZmVzdC5qc29uIiwKICBbc3RyaW5nXSRPdXRwdXREaXIgPSAiJFBTU2NyaXB0Um9vdFwuLlxkaXN0XGFuZHJvaWQiLAogIFtzdHJpbmddJFZlcnNpb24gPSAiMC4zLjQiLAogIFtzdHJpbmddJEFwa091dHB1dCA9ICIkUFNTY3JpcHRSb290XC4uXGRpc3RcY29kZXhodWItYW5kcm9pZC12MC4zLjQuYXBrIiwKICBbc3RyaW5nXSRLZXlQYXNzd29yZCA9ICRlbnY6Q09ERVhIVUJfQU5EUk9JRF9LRVlfUEFTU1dPUkQsCiAgW3N3aXRjaF0kU2tpcEluc3RhbGwKKQoKJEVycm9yQWN0aW9uUHJlZmVyZW5jZSA9ICJTdG9wIgoKZnVuY3Rpb24gUmVzb2x2ZS1Db21tYW5kT3JOdWxsKCROYW1lKSB7CiAgJGNvbW1hbmQgPSBHZXQtQ29tbWFuZCAkTmFtZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZQogIGlmICgkY29tbWFuZCkgeyByZXR1cm4gJGNvbW1hbmQuU291cmNlIH0KICByZXR1cm4gJG51bGwKfQoKZnVuY3Rpb24gV3JpdGUtVXRmOE5vQm9tKCRQYXRoLCAkVmFsdWUpIHsKICBbSU8uRmlsZV06OldyaXRlQWxsVGV4dCgoUmVzb2x2ZS1QYXRoIC1MaXRlcmFsUGF0aCAoU3BsaXQtUGF0aCAtUGFyZW50ICRQYXRoKSkuUGF0aCArIFtJTy5QYXRoXTo6RGlyZWN0b3J5U2VwYXJhdG9yQ2hhciArIChTcGxpdC1QYXRoIC1MZWFmICRQYXRoKSwgJFZhbHVlLCBbVGV4dC5VVEY4RW5jb2RpbmddOjpuZXcoJGZhbHNlKSkKfQoKaWYgKC1ub3QgKFJlc29sdmUtQ29tbWFuZE9yTnVsbCAiamF2YS5leGUiKSkgewogIHRocm93ICJKYXZhIDE3KyBpcyByZXF1aXJlZCB0byBidWlsZCB0aGUgQW5kcm9pZCBUV0EgcGFja2FnZS4iCn0KCmlmICgtbm90IChSZXNvbHZlLUNvbW1hbmRPck51bGwgImtleXRvb2wuZXhlIikpIHsKICB0aHJvdyAia2V5dG9vbCBpcyByZXF1aXJlZCB0byBjcmVhdGUgdGhlIEFuZHJvaWQgc2lnbmluZyBrZXkuIgp9CgppZiAoLW5vdCAkZW52OkFORFJPSURfSE9NRSAtYW5kIC1ub3QgJGVudjpBTkRST0lEX1NES19ST09UKSB7CiAgdGhyb3cgIkFORFJPSURfSE9NRSBvciBBTkRST0lEX1NES19ST09UIG11c3QgcG9pbnQgdG8gYW4gQW5kcm9pZCBTREsuIgp9CgokYW5kcm9pZFNkayA9IGlmICgkZW52OkFORFJPSURfSE9NRSkgeyAkZW52OkFORFJPSURfSE9NRSB9IGVsc2UgeyAkZW52OkFORFJPSURfU0RLX1JPT1QgfQokc2RrQmluID0gSm9pbi1QYXRoICRhbmRyb2lkU2RrICJiaW4iCmlmICgtbm90IChUZXN0LVBhdGggLUxpdGVyYWxQYXRoICRzZGtCaW4pKSB7CiAgTmV3LUl0ZW0gLUl0ZW1UeXBlIERpcmVjdG9yeSAtRm9yY2UgLVBhdGggJHNka0JpbiB8IE91dC1OdWxsCiAgJGNtZGxpbmVCaW4gPSBKb2luLVBhdGggJGFuZHJvaWRTZGsgImNtZGxpbmUtdG9vbHNcbGF0ZXN0XGJpbiIKICBpZiAoVGVzdC1QYXRoIC1MaXRlcmFsUGF0aCAoSm9pbi1QYXRoICRjbWRsaW5lQmluICJzZGttYW5hZ2VyLmJhdCIpKSB7CiAgICAiQGVjaG8gb2ZmYHJgbmAiJX5kcDAuLlxjbWRsaW5lLXRvb2xzXGxhdGVzdFxiaW5cc2RrbWFuYWdlci5iYXRgIiAlKmByYG4iIHwKICAgICAgU2V0LUNvbnRlbnQgLUxpdGVyYWxQYXRoIChKb2luLVBhdGggJHNka0JpbiAic2RrbWFuYWdlci5iYXQiKSAtRW5jb2RpbmcgQVNDSUkKICAgICJAZWNobyBvZmZgcmBuYCIlfmRwMC4uXGNtZGxpbmUtdG9vbHNcbGF0ZXN0XGJpblxhdmRtYW5hZ2VyLmJhdGAiICUqYHJgbiIgfAogICAgICBTZXQtQ29udGVudCAtTGl0ZXJhbFBhdGggKEpvaW4tUGF0aCAkc2RrQmluICJhdmRtYW5hZ2VyLmJhdCIpIC1FbmNvZGluZyBBU0NJSQogIH0KfQoKaWYgKC1ub3QgKFJlc29sdmUtQ29tbWFuZE9yTnVsbCAiYnViYmxld3JhcC5jbWQiKSkgewogIGlmICgkU2tpcEluc3RhbGwpIHsKICAgIHRocm93ICJidWJibGV3cmFwIGlzIG5vdCBpbnN0YWxsZWQuIFJ1bjogbnBtIGluc3RhbGwgLWcgQGJ1YmJsZXdyYXAvY2xpIgogIH0KICBucG0gaW5zdGFsbCAtZyBAYnViYmxld3JhcC9jbGkKfQoKTmV3LUl0ZW0gLUl0ZW1UeXBlIERpcmVjdG9yeSAtRm9yY2UgLVBhdGggJE91dHB1dERpciB8IE91dC1OdWxsCiRwcm9qZWN0RGlyID0gSm9pbi1QYXRoICRPdXRwdXREaXIgImNvZGV4aHViLXR3YSIKJGtleXN0b3JlID0gSm9pbi1QYXRoICRwcm9qZWN0RGlyICJjb2RleGh1Yi1yZWxlYXNlLmtleXN0b3JlIgokY3JlZGVudGlhbHMgPSBKb2luLVBhdGggJE91dHB1dERpciAiY29kZXhodWItYW5kcm9pZC1zaWduaW5nLWNyZWRlbnRpYWxzLnR4dCIKCmlmICgtbm90ICRLZXlQYXNzd29yZCAtYW5kIChUZXN0LVBhdGggLUxpdGVyYWxQYXRoICRjcmVkZW50aWFscykpIHsKICAkZXhpc3RpbmdDcmVkZW50aWFscyA9IEdldC1Db250ZW50IC1MaXRlcmFsUGF0aCAkY3JlZGVudGlhbHMgLVJhdwogICRtYXRjaCA9IFtyZWdleF06Ok1hdGNoKCRleGlzdGluZ0NyZWRlbnRpYWxzLCAiS2V5c3RvcmUgcGFzc3dvcmQ6IChcUyspIikKICBpZiAoJG1hdGNoLlN1Y2Nlc3MpIHsKICAgICRLZXlQYXNzd29yZCA9ICRtYXRjaC5Hcm91cHNbMV0uVmFsdWUKICB9Cn0KCmlmICgtbm90ICRLZXlQYXNzd29yZCkgewogICRieXRlcyA9IE5ldy1PYmplY3QgYnl0ZVtdIDE4CiAgW1NlY3VyaXR5LkNyeXB0b2dyYXBoeS5SYW5kb21OdW1iZXJHZW5lcmF0b3JdOjpGaWxsKCRieXRlcykKICAkS2V5UGFzc3dvcmQgPSBbQ29udmVydF06OlRvQmFzZTY0U3RyaW5nKCRieXRlcykuVHJpbUVuZCgiPSIpLlJlcGxhY2UoIisiLCAiQSIpLlJlcGxhY2UoIi8iLCAiQiIpCn0KCk5ldy1JdGVtIC1JdGVtVHlwZSBEaXJlY3RvcnkgLUZvcmNlIC1QYXRoICRwcm9qZWN0RGlyIHwgT3V0LU51bGwKaWYgKC1ub3QgKFRlc3QtUGF0aCAtTGl0ZXJhbFBhdGggJGtleXN0b3JlKSkgewogIGtleXRvb2wgLWdlbmtleXBhaXIgLXYgYAogICAgLWtleXN0b3JlICRrZXlzdG9yZSBgCiAgICAtc3RvcmV0eXBlIFBLQ1MxMiBgCiAgICAtYWxpYXMgY29kZXhodWIgYAogICAgLWtleWFsZyBSU0EgYAogICAgLWtleXNpemUgMjA0OCBgCiAgICAtdmFsaWRpdHkgMTAwMDAgYAogICAgLXN0b3JlcGFzcyAkS2V5UGFzc3dvcmQgYAogICAgLWtleXBhc3MgJEtleVBhc3N3b3JkIGAKICAgIC1kbmFtZSAiQ049Q29kZXhIdWIsIE9VPUNvZGV4SHViLCBPPUhlZGF0dSwgTD1Ib25nIEtvbmcsIFM9SG9uZyBLb25nLCBDPUhLIgp9CgpAIgpDb2RleEh1YiBBbmRyb2lkIHNpZ25pbmcga2V5CkdlbmVyYXRlZDogJChHZXQtRGF0ZSAtRm9ybWF0ICd5eXl5LU1NLWRkIEhIOm1tOnNzIHp6eicpCktleXN0b3JlOiAka2V5c3RvcmUKQWxpYXM6IGNvZGV4aHViCktleXN0b3JlIHBhc3N3b3JkOiAkS2V5UGFzc3dvcmQKS2V5IHBhc3N3b3JkOiAkS2V5UGFzc3dvcmQKCktlZXAgdGhpcyBmaWxlIGFuZCBrZXlzdG9yZS4gRnV0dXJlIEFQSyB1cGdyYWRlcyBtdXN0IHVzZSB0aGUgc2FtZSBrZXlzdG9yZS4KIkAgfCBTZXQtQ29udGVudCAtTGl0ZXJhbFBhdGggJGNyZWRlbnRpYWxzIC1FbmNvZGluZyBVVEY4CgokbWFuaWZlc3RPYmplY3QgPSBHZXQtQ29udGVudCAtTGl0ZXJhbFBhdGggJE1hbmlmZXN0IC1SYXcgfCBDb252ZXJ0RnJvbS1Kc29uCiRtYW5pZmVzdE9iamVjdC5zaWduaW5nS2V5LnBhdGggPSAiLi9jb2RleGh1Yi1yZWxlYXNlLmtleXN0b3JlIgokbWFuaWZlc3RPYmplY3QgfCBBZGQtTWVtYmVyIC1Ob3RlUHJvcGVydHlOYW1lIGdlbmVyYXRvckFwcCAtTm90ZVByb3BlcnR5VmFsdWUgImJ1YmJsZXdyYXAtY2xpIiAtRm9yY2UKJHByb2plY3RNYW5pZmVzdCA9IEpvaW4tUGF0aCAkcHJvamVjdERpciAidHdhLW1hbmlmZXN0Lmpzb24iCldyaXRlLVV0ZjhOb0JvbSAkcHJvamVjdE1hbmlmZXN0ICgkbWFuaWZlc3RPYmplY3QgfCBDb252ZXJ0VG8tSnNvbiAtRGVwdGggMjApCgokZ2xvYmFsTm9kZU1vZHVsZXMgPSAobnBtIHJvb3QgLWcpLlRyaW0oKQokYnViYmxld3JhcENvcmUgPSBKb2luLVBhdGggJGdsb2JhbE5vZGVNb2R1bGVzICJAYnViYmxld3JhcFxjbGlcbm9kZV9tb2R1bGVzXEBidWJibGV3cmFwXGNvcmUiCiRlbnY6Q09ERVhIVUJfVFdBX1BST0pFQ1RfRElSID0gKFJlc29sdmUtUGF0aCAkcHJvamVjdERpcikKJGVudjpDT0RFWEhVQl9UV0FfTUFOSUZFU1QgPSAoUmVzb2x2ZS1QYXRoICRwcm9qZWN0TWFuaWZlc3QpCiRlbnY6Q09ERVhIVUJfQlVCQkxFV1JBUF9DT1JFID0gJGJ1YmJsZXdyYXBDb3JlCgpAJwpjb25zdCBmcyA9IHJlcXVpcmUoImZzIik7CmNvbnN0IGNyeXB0byA9IHJlcXVpcmUoImNyeXB0byIpOwpjb25zdCBwYXRoID0gcmVxdWlyZSgicGF0aCIpOwpjb25zdCBjb3JlID0gcmVxdWlyZShwcm9jZXNzLmVudi5DT0RFWEhVQl9CVUJCTEVXUkFQX0NPUkUpOwoKKGFzeW5jICgpID0+IHsKICBjb25zdCBwcm9qZWN0RGlyID0gcHJvY2Vzcy5lbnYuQ09ERVhIVUJfVFdBX1BST0pFQ1RfRElSOwogIGNvbnN0IG1hbmlmZXN0RmlsZSA9IHByb2Nlc3MuZW52LkNPREVYSFVCX1RXQV9NQU5JRkVTVDsKICBjb25zdCBtYW5pZmVzdCA9IGF3YWl0IGNvcmUuVHdhTWFuaWZlc3QuZnJvbUZpbGUobWFuaWZlc3RGaWxlKTsKICBjb25zdCBnZW5lcmF0b3IgPSBuZXcgY29yZS5Ud2FHZW5lcmF0b3IoKTsKICBjb25zdCBsb2cgPSBuZXcgY29yZS5CdWZmZXJlZExvZyhuZXcgY29yZS5Db25zb2xlTG9nKCJnZW5lcmF0ZSIpKTsKICBhd2FpdCBnZW5lcmF0b3IucmVtb3ZlVHdhUHJvamVjdChwcm9qZWN0RGlyKTsKICBhd2FpdCBnZW5lcmF0b3IuY3JlYXRlVHdhUHJvamVjdChwcm9qZWN0RGlyLCBtYW5pZmVzdCwgbG9nLCAoKSA9PiB7fSk7CiAgbG9nLmZsdXNoKCk7CiAgZnMuY29weUZpbGVTeW5jKG1hbmlmZXN0RmlsZSwgcGF0aC5qb2luKHByb2plY3REaXIsICJ0d2EtbWFuaWZlc3QuanNvbiIpKTsKICBjb25zdCBzdW0gPSBjcnlwdG8uY3JlYXRlSGFzaCgic2hhMSIpLnVwZGF0ZShmcy5yZWFkRmlsZVN5bmMobWFuaWZlc3RGaWxlKSkuZGlnZXN0KCJoZXgiKTsKICBmcy53cml0ZUZpbGVTeW5jKHBhdGguam9pbihwcm9qZWN0RGlyLCAibWFuaWZlc3QtY2hlY2tzdW0udHh0IiksIHN1bSk7Cn0pKCkuY2F0Y2goKGVycm9yKSA9PiB7CiAgY29uc29sZS5lcnJvcihlcnJvcik7CiAgcHJvY2Vzcy5leGl0KDEpOwp9KTsKJ0AgfCBub2RlCmlmICgkTEFTVEVYSVRDT0RFIC1uZSAwKSB7CiAgdGhyb3cgIkZhaWxlZCB0byBnZW5lcmF0ZSB0aGUgQW5kcm9pZCBUV0EgcHJvamVjdC4iCn0KCiRyb290R3JhZGxlID0gSm9pbi1QYXRoICRwcm9qZWN0RGlyICJidWlsZC5ncmFkbGUiCiRyb290R3JhZGxlVGV4dCA9IEdldC1Db250ZW50IC1MaXRlcmFsUGF0aCAkcm9vdEdyYWRsZSAtUmF3CiRyb290R3JhZGxlVGV4dCA9ICRyb290R3JhZGxlVGV4dCAtcmVwbGFjZSAiamNlbnRlclwoXCkiLCAibWF2ZW5DZW50cmFsKCkiCiRyb290R3JhZGxlVGV4dCA9ICRyb290R3JhZGxlVGV4dCAtcmVwbGFjZSAicmVwb3NpdG9yaWVzIFx7XHMqZ29vZ2xlXChcKVxzKm1hdmVuQ2VudHJhbFwoXClccypcfSIsIEAiCnJlcG9zaXRvcmllcyB7CiAgICAgICAgbWF2ZW4geyB1cmwgJ2h0dHBzOi8vbWF2ZW4uYWxpeXVuLmNvbS9yZXBvc2l0b3J5L2dvb2dsZScgfQogICAgICAgIG1hdmVuIHsgdXJsICdodHRwczovL21hdmVuLmFsaXl1bi5jb20vcmVwb3NpdG9yeS9jZW50cmFsJyB9CiAgICAgICAgZ29vZ2xlKCkKICAgICAgICBtYXZlbkNlbnRyYWwoKQogICAgfQoiQApXcml0ZS1VdGY4Tm9Cb20gJHJvb3RHcmFkbGUgJHJvb3RHcmFkbGVUZXh0CgokYXBwR3JhZGxlID0gSm9pbi1QYXRoICRwcm9qZWN0RGlyICJhcHBcYnVpbGQuZ3JhZGxlIgokYXBwR3JhZGxlVGV4dCA9IEdldC1Db250ZW50IC1MaXRlcmFsUGF0aCAkYXBwR3JhZGxlIC1SYXcKJGFwcEdyYWRsZVRleHQgPSAkYXBwR3JhZGxlVGV4dCAtcmVwbGFjZSAndmVyc2lvbk5hbWUgIiInLCAidmVyc2lvbk5hbWUgYCIkVmVyc2lvbmAiIgpXcml0ZS1VdGY4Tm9Cb20gJGFwcEdyYWRsZSAkYXBwR3JhZGxlVGV4dAoKUHVzaC1Mb2NhdGlvbiAkcHJvamVjdERpcgp0cnkgewogIGlmIChSZXNvbHZlLUNvbW1hbmRPck51bGwgImdyYWRsZS5jbWQiKSB7CiAgICBncmFkbGUgYXNzZW1ibGVSZWxlYXNlIC0tbm8tZGFlbW9uCiAgfSBlbHNlIHsKICAgIC5cZ3JhZGxldy5iYXQgYXNzZW1ibGVSZWxlYXNlIC0tbm8tZGFlbW9uCiAgfQogIGlmICgkTEFTVEVYSVRDT0RFIC1uZSAwKSB7CiAgICB0aHJvdyAiR3JhZGxlIGFzc2VtYmxlUmVsZWFzZSBmYWlsZWQgd2l0aCBleGl0IGNvZGUgJExBU1RFWElUQ09ERS4iCiAgfQp9IGZpbmFsbHkgewogIFBvcC1Mb2NhdGlvbgp9CgokdW5zaWduZWQgPSBKb2luLVBhdGggJHByb2plY3REaXIgImFwcFxidWlsZFxvdXRwdXRzXGFwa1xyZWxlYXNlXGFwcC1yZWxlYXNlLXVuc2lnbmVkLmFwayIKJGFsaWduZWQgPSBKb2luLVBhdGggJHByb2plY3REaXIgImFwcC1yZWxlYXNlLXVuc2lnbmVkLWFsaWduZWQuYXBrIgokc2lnbmVkID0gSm9pbi1QYXRoICRwcm9qZWN0RGlyICJhcHAtcmVsZWFzZS1zaWduZWQuYXBrIgokYnVpbGRUb29scyA9IEdldC1DaGlsZEl0ZW0gLUxpdGVyYWxQYXRoIChKb2luLVBhdGggJGFuZHJvaWRTZGsgImJ1aWxkLXRvb2xzIikgLURpcmVjdG9yeSB8CiAgU29ydC1PYmplY3QgTmFtZSAtRGVzY2VuZGluZyB8CiAgU2VsZWN0LU9iamVjdCAtRmlyc3QgMQppZiAoLW5vdCAkYnVpbGRUb29scykgewogIHRocm93ICJBbmRyb2lkIGJ1aWxkLXRvb2xzIHdlcmUgbm90IGZvdW5kIHVuZGVyICRhbmRyb2lkU2RrLiIKfQokemlwYWxpZ24gPSBKb2luLVBhdGggJGJ1aWxkVG9vbHMuRnVsbE5hbWUgInppcGFsaWduLmV4ZSIKJGFwa3NpZ25lciA9IEpvaW4tUGF0aCAkYnVpbGRUb29scy5GdWxsTmFtZSAiYXBrc2lnbmVyLmJhdCIKClJlbW92ZS1JdGVtIC1MaXRlcmFsUGF0aCAkYWxpZ25lZCwkc2lnbmVkLCRBcGtPdXRwdXQgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCiYgJHppcGFsaWduIC1wIC1mIDQgJHVuc2lnbmVkICRhbGlnbmVkCmlmICgkTEFTVEVYSVRDT0RFIC1uZSAwKSB7CiAgdGhyb3cgInppcGFsaWduIGZhaWxlZCB3aXRoIGV4aXQgY29kZSAkTEFTVEVYSVRDT0RFLiIKfQomICRhcGtzaWduZXIgc2lnbiAtLWtzICRrZXlzdG9yZSAtLWtzLWtleS1hbGlhcyBjb2RleGh1YiAtLWtzLXBhc3MgInBhc3M6JEtleVBhc3N3b3JkIiAtLWtleS1wYXNzICJwYXNzOiRLZXlQYXNzd29yZCIgLS1vdXQgJHNpZ25lZCAkYWxpZ25lZAppZiAoJExBU1RFWElUQ09ERSAtbmUgMCkgewogIHRocm93ICJhcGtzaWduZXIgZmFpbGVkIHdpdGggZXhpdCBjb2RlICRMQVNURVhJVENPREUuIgp9CiYgJGFwa3NpZ25lciB2ZXJpZnkgLS12ZXJib3NlIC0tcHJpbnQtY2VydHMgJHNpZ25lZAppZiAoJExBU1RFWElUQ09ERSAtbmUgMCkgewogIHRocm93ICJBUEsgc2lnbmF0dXJlIHZlcmlmaWNhdGlvbiBmYWlsZWQgd2l0aCBleGl0IGNvZGUgJExBU1RFWElUQ09ERS4iCn0KQ29weS1JdGVtIC1MaXRlcmFsUGF0aCAkc2lnbmVkIC1EZXN0aW5hdGlvbiAkQXBrT3V0cHV0IC1Gb3JjZQoKV3JpdGUtSG9zdCAiQW5kcm9pZCBBUEsgYnVpbHQ6ICRBcGtPdXRwdXQiCldyaXRlLUhvc3QgIlNpZ25pbmcgY3JlZGVudGlhbHM6ICRjcmVkZW50aWFscyIK
+param(
+  [string]$Manifest = "$PSScriptRoot\..\android\twa-manifest.json",
+  [string]$OutputDir = "$PSScriptRoot\..\dist\android",
+  [string]$Version = "0.4.0",
+  [string]$ApkOutput = "$PSScriptRoot\..\dist\codexhub-android-v0.4.0.apk",
+  [string]$KeyPassword = $env:CODEXHUB_ANDROID_KEY_PASSWORD,
+  [switch]$SkipInstall
+)
+
+$ErrorActionPreference = "Stop"
+
+function Resolve-CommandOrNull($Name) {
+  $command = Get-Command $Name -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+  return $null
+}
+
+function Write-Utf8NoBom($Path, $Value) {
+  [IO.File]::WriteAllText((Resolve-Path -LiteralPath (Split-Path -Parent $Path)).Path + [IO.Path]::DirectorySeparatorChar + (Split-Path -Leaf $Path), $Value, [Text.UTF8Encoding]::new($false))
+}
+
+if (-not (Resolve-CommandOrNull "java.exe")) {
+  throw "Java 17+ is required to build the Android TWA package."
+}
+
+if (-not (Resolve-CommandOrNull "keytool.exe")) {
+  throw "keytool is required to create the Android signing key."
+}
+
+if (-not $env:ANDROID_HOME -and -not $env:ANDROID_SDK_ROOT) {
+  throw "ANDROID_HOME or ANDROID_SDK_ROOT must point to an Android SDK."
+}
+
+$androidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $env:ANDROID_SDK_ROOT }
+$sdkBin = Join-Path $androidSdk "bin"
+if (-not (Test-Path -LiteralPath $sdkBin)) {
+  New-Item -ItemType Directory -Force -Path $sdkBin | Out-Null
+  $cmdlineBin = Join-Path $androidSdk "cmdline-tools\latest\bin"
+  if (Test-Path -LiteralPath (Join-Path $cmdlineBin "sdkmanager.bat")) {
+    "@echo off`r`n`"%~dp0..\cmdline-tools\latest\bin\sdkmanager.bat`" %*`r`n" |
+      Set-Content -LiteralPath (Join-Path $sdkBin "sdkmanager.bat") -Encoding ASCII
+    "@echo off`r`n`"%~dp0..\cmdline-tools\latest\bin\avdmanager.bat`" %*`r`n" |
+      Set-Content -LiteralPath (Join-Path $sdkBin "avdmanager.bat") -Encoding ASCII
+  }
+}
+
+if (-not (Resolve-CommandOrNull "bubblewrap.cmd")) {
+  if ($SkipInstall) {
+    throw "bubblewrap is not installed. Run: npm install -g @bubblewrap/cli"
+  }
+  npm install -g @bubblewrap/cli
+}
+
+New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+$projectDir = Join-Path $OutputDir "codexhub-twa"
+$keystore = Join-Path $projectDir "codexhub-release.keystore"
+$credentials = Join-Path $OutputDir "codexhub-android-signing-credentials.txt"
+
+if (-not $KeyPassword -and (Test-Path -LiteralPath $credentials)) {
+  $existingCredentials = Get-Content -LiteralPath $credentials -Raw
+  $match = [regex]::Match($existingCredentials, "Keystore password: (\S+)")
+  if ($match.Success) {
+    $KeyPassword = $match.Groups[1].Value
+  }
+}
+
+if (-not $KeyPassword) {
+  $bytes = New-Object byte[] 18
+  [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $KeyPassword = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "A").Replace("/", "B")
+}
+
+New-Item -ItemType Directory -Force -Path $projectDir | Out-Null
+if (-not (Test-Path -LiteralPath $keystore)) {
+  keytool -genkeypair -v `
+    -keystore $keystore `
+    -storetype PKCS12 `
+    -alias codexhub `
+    -keyalg RSA `
+    -keysize 2048 `
+    -validity 10000 `
+    -storepass $KeyPassword `
+    -keypass $KeyPassword `
+    -dname "CN=CodexHub, OU=CodexHub, O=Hedatu, L=Hong Kong, S=Hong Kong, C=HK"
+}
+
+@"
+CodexHub Android signing key
+Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')
+Keystore: $keystore
+Alias: codexhub
+Keystore password: $KeyPassword
+Key password: $KeyPassword
+
+Keep this file and keystore. Future APK upgrades must use the same keystore.
+"@ | Set-Content -LiteralPath $credentials -Encoding UTF8
+
+$manifestObject = Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
+$manifestObject.signingKey.path = "./codexhub-release.keystore"
+$manifestObject | Add-Member -NotePropertyName generatorApp -NotePropertyValue "bubblewrap-cli" -Force
+$projectManifest = Join-Path $projectDir "twa-manifest.json"
+Write-Utf8NoBom $projectManifest ($manifestObject | ConvertTo-Json -Depth 20)
+
+$globalNodeModules = (npm root -g).Trim()
+$bubblewrapCore = Join-Path $globalNodeModules "@bubblewrap\cli\node_modules\@bubblewrap\core"
+$env:CODEXHUB_TWA_PROJECT_DIR = (Resolve-Path $projectDir)
+$env:CODEXHUB_TWA_MANIFEST = (Resolve-Path $projectManifest)
+$env:CODEXHUB_BUBBLEWRAP_CORE = $bubblewrapCore
+
+@'
+const fs = require("fs");
+const crypto = require("crypto");
+const path = require("path");
+const core = require(process.env.CODEXHUB_BUBBLEWRAP_CORE);
+
+(async () => {
+  const projectDir = process.env.CODEXHUB_TWA_PROJECT_DIR;
+  const manifestFile = process.env.CODEXHUB_TWA_MANIFEST;
+  const manifest = await core.TwaManifest.fromFile(manifestFile);
+  const generator = new core.TwaGenerator();
+  const log = new core.BufferedLog(new core.ConsoleLog("generate"));
+  await generator.removeTwaProject(projectDir);
+  await generator.createTwaProject(projectDir, manifest, log, () => {});
+  log.flush();
+  fs.copyFileSync(manifestFile, path.join(projectDir, "twa-manifest.json"));
+  const sum = crypto.createHash("sha1").update(fs.readFileSync(manifestFile)).digest("hex");
+  fs.writeFileSync(path.join(projectDir, "manifest-checksum.txt"), sum);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+'@ | node
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to generate the Android TWA project."
+}
+
+$rootGradle = Join-Path $projectDir "build.gradle"
+$rootGradleText = Get-Content -LiteralPath $rootGradle -Raw
+$rootGradleText = $rootGradleText -replace "jcenter\(\)", "mavenCentral()"
+$rootGradleText = $rootGradleText -replace "repositories \{\s*google\(\)\s*mavenCentral\(\)\s*\}", @"
+repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/central' }
+        google()
+        mavenCentral()
+    }
+"@
+Write-Utf8NoBom $rootGradle $rootGradleText
+
+$appGradle = Join-Path $projectDir "app\build.gradle"
+$appGradleText = Get-Content -LiteralPath $appGradle -Raw
+$appGradleText = $appGradleText -replace 'versionName ""', "versionName `"$Version`""
+Write-Utf8NoBom $appGradle $appGradleText
+
+Push-Location $projectDir
+try {
+  if (Resolve-CommandOrNull "gradle.cmd") {
+    gradle assembleRelease --no-daemon
+  } else {
+    .\gradlew.bat assembleRelease --no-daemon
+  }
+  if ($LASTEXITCODE -ne 0) {
+    throw "Gradle assembleRelease failed with exit code $LASTEXITCODE."
+  }
+} finally {
+  Pop-Location
+}
+
+$unsigned = Join-Path $projectDir "app\build\outputs\apk\release\app-release-unsigned.apk"
+$aligned = Join-Path $projectDir "app-release-unsigned-aligned.apk"
+$signed = Join-Path $projectDir "app-release-signed.apk"
+$buildTools = Get-ChildItem -LiteralPath (Join-Path $androidSdk "build-tools") -Directory |
+  Sort-Object Name -Descending |
+  Select-Object -First 1
+if (-not $buildTools) {
+  throw "Android build-tools were not found under $androidSdk."
+}
+$zipalign = Join-Path $buildTools.FullName "zipalign.exe"
+$apksigner = Join-Path $buildTools.FullName "apksigner.bat"
+
+Remove-Item -LiteralPath $aligned,$signed,$ApkOutput -Force -ErrorAction SilentlyContinue
+& $zipalign -p -f 4 $unsigned $aligned
+if ($LASTEXITCODE -ne 0) {
+  throw "zipalign failed with exit code $LASTEXITCODE."
+}
+& $apksigner sign --ks $keystore --ks-key-alias codexhub --ks-pass "pass:$KeyPassword" --key-pass "pass:$KeyPassword" --out $signed $aligned
+if ($LASTEXITCODE -ne 0) {
+  throw "apksigner failed with exit code $LASTEXITCODE."
+}
+& $apksigner verify --verbose --print-certs $signed
+if ($LASTEXITCODE -ne 0) {
+  throw "APK signature verification failed with exit code $LASTEXITCODE."
+}
+Copy-Item -LiteralPath $signed -Destination $ApkOutput -Force
+
+Write-Host "Android APK built: $ApkOutput"
+Write-Host "Signing credentials: $credentials"
