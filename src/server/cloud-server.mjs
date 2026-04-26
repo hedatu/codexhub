@@ -232,6 +232,90 @@ function sortThreads(threads) {
   return [...threads].sort((a, b) => activityTime(b) - activityTime(a));
 }
 
+function buildSyncHealth(node, status, threads, unread) {
+  const commands = Array.isArray(node.commands) ? node.commands : [];
+  const farfield = node.farfield && typeof node.farfield === "object" ? node.farfield : {};
+  const latestThread = threads[0] ?? null;
+  const latestThreadAt = latestThread
+    ? latestThread.latestFinalMessageAt ?? latestThread.latestProgressMessageAt ?? latestThread.latestMessageAt ?? latestThread.updatedAt ?? latestThread.createdAt ?? null
+    : null;
+  const commandCounts = {
+    queued: commands.filter((command) => command.status === "queued").length,
+    leased: commands.filter((command) => command.status === "leased").length,
+    done: commands.filter((command) => command.status === "done").length,
+    failed: commands.filter((command) => command.status === "failed").length,
+  };
+  const recentCommand = [...commands]
+    .sort((a, b) => valueTime(b.completedAt ?? b.leasedAt ?? b.createdAt) - valueTime(a.completedAt ?? a.leasedAt ?? a.createdAt))[0] ?? null;
+  const checks = [
+    {
+      key: "cloud",
+      label: "云端上报",
+      state: status === "online" ? "ok" : "danger",
+      detail: status === "online" ? "电脑端正在上报" : "超过同步窗口未上报",
+      at: node.lastSeenAt ?? null,
+    },
+    {
+      key: "farfield",
+      label: "Farfield 本地服务",
+      state: farfield.ok ? "ok" : "danger",
+      detail: farfield.ok ? "可访问本地 Codex 网关" : String(farfield.lastError ?? node.lastError ?? "本地服务不可用"),
+      at: node.lastSeenAt ?? null,
+    },
+    {
+      key: "codex",
+      label: "Codex 会话读取",
+      state: latestThread ? "ok" : "warning",
+      detail: latestThread ? `最近任务 ${latestThread.isGenerating ? "运行中" : "已同步"}` : "还没有读到 Codex 会话",
+      at: latestThreadAt,
+    },
+    {
+      key: "commands",
+      label: "命令回执",
+      state: commandCounts.failed > 0 ? "danger" : (commandCounts.queued + commandCounts.leased > 0 ? "warning" : "ok"),
+      detail: commandCounts.failed > 0
+        ? `${commandCounts.failed} 条命令失败`
+        : commandCounts.queued + commandCounts.leased > 0
+          ? `${commandCounts.queued + commandCounts.leased} 条命令等待桌面端回执`
+          : "命令队列正常",
+      at: recentCommand?.completedAt ?? recentCommand?.leasedAt ?? recentCommand?.createdAt ?? null,
+    },
+    {
+      key: "notifications",
+      label: "未读通知",
+      state: unread.length > 0 ? "warning" : "ok",
+      detail: unread.length > 0 ? `${unread.length} 条未读等待处理` : "没有未读事项",
+      at: unread[0]?.createdAt ?? null,
+    },
+  ];
+  const overall = checks.some((check) => check.state === "danger") ? "danger" : checks.some((check) => check.state === "warning") ? "warning" : "ok";
+  return {
+    overall,
+    checks,
+    lastSeenAgeMs: valueTime(node.lastSeenAt) ? Math.max(0, Date.now() - valueTime(node.lastSeenAt)) : null,
+    latestThread: latestThread ? {
+      id: latestThread.id,
+      title: latestThread.title ?? null,
+      preview: latestThread.preview ?? latestThread.latestMessage ?? "",
+      at: latestThreadAt,
+      isGenerating: Boolean(latestThread.isGenerating),
+      waitingOnApproval: Boolean(latestThread.waitingOnApproval),
+      waitingOnUserInput: Boolean(latestThread.waitingOnUserInput),
+    } : null,
+    commandCounts,
+    recentCommand: recentCommand ? {
+      id: recentCommand.id,
+      status: recentCommand.status,
+      kind: recentCommand.action?.kind ?? "command",
+      createdAt: recentCommand.createdAt,
+      leasedAt: recentCommand.leasedAt ?? null,
+      completedAt: recentCommand.completedAt ?? null,
+      error: recentCommand.result?.error ?? recentCommand.result?.result?.error ?? null,
+    } : null,
+    unreadNotifications: unread.length,
+  };
+}
+
 function normalizeThread(thread) {
   return {
     id: String(thread.id ?? ""),
@@ -386,6 +470,7 @@ function publicNode(node) {
     notifications,
     lastError: node.lastError ?? null,
     pendingCommands: (node.commands ?? []).filter((command) => command.status === "queued").length,
+    syncHealth: buildSyncHealth(node, status, threads, unread),
     recentCommandResults: (node.commands ?? [])
       .filter((command) => command.status === "done" || command.status === "failed")
       .slice(-10),

@@ -691,8 +691,181 @@ func (s *server) publicNodeLocked(node *codexhub.Node) map[string]any {
 		"notifications":        node.Notifications,
 		"lastError":            node.LastError,
 		"pendingCommands":      pending,
+		"syncHealth":           s.syncHealthLocked(node, threads, unread),
 		"recentCommandResults": results,
 	}
+}
+
+func (s *server) syncHealthLocked(node *codexhub.Node, threads []codexhub.Thread, unread []codexhub.Notification) map[string]any {
+	status := s.nodeStatusLocked(node)
+	farfield := mapValue(node.Farfield)
+	var latest *codexhub.Thread
+	if len(threads) > 0 {
+		latest = &threads[0]
+	}
+	var latestThreadAt any
+	if latest != nil {
+		latestThreadAt = firstNonZero(latest.LatestFinalMessageAt, latest.LatestProgressMessageAt, latest.LatestMessageAt, latest.UpdatedAt, latest.CreatedAt)
+	}
+	commandCounts := map[string]int{"queued": 0, "leased": 0, "done": 0, "failed": 0}
+	var recent *codexhub.Command
+	for i := range node.Commands {
+		c := &node.Commands[i]
+		if _, ok := commandCounts[c.Status]; ok {
+			commandCounts[c.Status]++
+		}
+		if recent == nil || anyTimeMillis(firstNonZero(c.CompletedAt, c.LeasedAt, c.CreatedAt)) > anyTimeMillis(firstNonZero(recent.CompletedAt, recent.LeasedAt, recent.CreatedAt)) {
+			recent = c
+		}
+	}
+	checks := []map[string]any{
+		{
+			"key":    "cloud",
+			"label":  "云端上报",
+			"state":  map[bool]string{true: "ok", false: "danger"}[status == "online"],
+			"detail": map[bool]string{true: "电脑端正在上报", false: "超过同步窗口未上报"}[status == "online"],
+			"at":     nullableString(node.LastSeenAt),
+		},
+		{
+			"key":    "farfield",
+			"label":  "Farfield 本地服务",
+			"state":  map[bool]string{true: "ok", false: "danger"}[boolValue(farfield["ok"])],
+			"detail": map[bool]string{true: "可访问本地 Codex 网关", false: firstNonEmptyString(stringValue(farfield["lastError"]), stringValue(node.LastError), "本地服务不可用")}[boolValue(farfield["ok"])],
+			"at":     nullableString(node.LastSeenAt),
+		},
+		{
+			"key":    "codex",
+			"label":  "Codex 会话读取",
+			"state":  map[bool]string{true: "ok", false: "warning"}[latest != nil],
+			"detail": map[bool]string{true: latestThreadDetail(latest), false: "还没有读到 Codex 会话"}[latest != nil],
+			"at":     latestThreadAt,
+		},
+		{
+			"key":    "commands",
+			"label":  "命令回执",
+			"state":  commandCheckState(commandCounts),
+			"detail": commandCheckDetail(commandCounts),
+			"at": func() any {
+				if recent == nil {
+					return nil
+				}
+				return firstNonZero(recent.CompletedAt, recent.LeasedAt, recent.CreatedAt)
+			}(),
+		},
+		{
+			"key":    "notifications",
+			"label":  "未读通知",
+			"state":  map[bool]string{true: "warning", false: "ok"}[len(unread) > 0],
+			"detail": map[bool]string{true: fmt.Sprintf("%d 条未读等待处理", len(unread)), false: "没有未读事项"}[len(unread) > 0],
+			"at": func() any {
+				if len(unread) == 0 {
+					return nil
+				}
+				return unread[0].CreatedAt
+			}(),
+		},
+	}
+	overall := "ok"
+	for _, check := range checks {
+		if check["state"] == "danger" {
+			overall = "danger"
+			break
+		}
+		if check["state"] == "warning" {
+			overall = "warning"
+		}
+	}
+	var latestThread any
+	if latest != nil {
+		latestThread = map[string]any{
+			"id":                 latest.ID,
+			"title":              latest.Title,
+			"preview":            firstNonEmptyString(latest.Preview, latest.LatestMessage),
+			"at":                 latestThreadAt,
+			"isGenerating":       latest.IsGenerating,
+			"waitingOnApproval":  latest.WaitingOnApproval,
+			"waitingOnUserInput": latest.WaitingOnUserInput,
+		}
+	}
+	var recentCommand any
+	if recent != nil {
+		recentCommand = map[string]any{
+			"id":          recent.ID,
+			"status":      recent.Status,
+			"kind":        firstNonEmptyString(stringValue(recent.Action["kind"]), "command"),
+			"createdAt":   recent.CreatedAt,
+			"leasedAt":    recent.LeasedAt,
+			"completedAt": recent.CompletedAt,
+			"error":       commandError(recent),
+		}
+	}
+	return map[string]any{
+		"overall":             overall,
+		"checks":              checks,
+		"lastSeenAgeMs":       lastSeenAgeMillis(node.LastSeenAt),
+		"latestThread":        latestThread,
+		"commandCounts":       commandCounts,
+		"recentCommand":       recentCommand,
+		"unreadNotifications": len(unread),
+	}
+}
+
+func latestThreadDetail(thread *codexhub.Thread) string {
+	if thread == nil {
+		return "还没有读到 Codex 会话"
+	}
+	if thread.IsGenerating {
+		return "最近任务运行中"
+	}
+	return "最近任务已同步"
+}
+
+func commandCheckState(counts map[string]int) string {
+	if counts["failed"] > 0 {
+		return "danger"
+	}
+	if counts["queued"]+counts["leased"] > 0 {
+		return "warning"
+	}
+	return "ok"
+}
+
+func commandCheckDetail(counts map[string]int) string {
+	if counts["failed"] > 0 {
+		return fmt.Sprintf("%d 条命令失败", counts["failed"])
+	}
+	if pending := counts["queued"] + counts["leased"]; pending > 0 {
+		return fmt.Sprintf("%d 条命令等待桌面端回执", pending)
+	}
+	return "命令队列正常"
+}
+
+func commandError(command *codexhub.Command) any {
+	if command == nil {
+		return nil
+	}
+	if m := mapValue(command.Result); m != nil {
+		if errText := stringValue(m["error"]); errText != "" {
+			return errText
+		}
+		if result := mapValue(m["result"]); result != nil {
+			if errText := stringValue(result["error"]); errText != "" {
+				return errText
+			}
+		}
+	}
+	return nil
+}
+
+func lastSeenAgeMillis(lastSeenAt string) any {
+	if lastSeenAt == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, lastSeenAt)
+	if err != nil {
+		return nil
+	}
+	return time.Since(parsed).Milliseconds()
 }
 
 func threadActivityMillis(thread codexhub.Thread) int64 {

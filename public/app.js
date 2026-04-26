@@ -24,6 +24,7 @@ const dom = {
   metricApproval: document.querySelector("#metricApproval"),
   attentionCount: document.querySelector("#attentionCount"),
   attentionList: document.querySelector("#attentionList"),
+  syncDiagnostics: document.querySelector("#syncDiagnostics"),
   markAllReadBtn: document.querySelector("#markAllReadBtn"),
   nodeList: document.querySelector("#nodeList"),
   nodeRange: document.querySelector("#nodeRange"),
@@ -167,6 +168,15 @@ function threadActivityTime(thread) {
   return toMillis(thread.latestFinalMessageAt || thread.latestProgressMessageAt || thread.latestMessageAt || thread.updatedAt || thread.createdAt);
 }
 
+function syncLabel(stateName) {
+  const labels = {
+    ok: { className: "online", text: "正常" },
+    warning: { className: "waiting", text: "注意" },
+    danger: { className: "approval", text: "异常" },
+  };
+  return labels[stateName] ?? { className: "offline", text: "未知" };
+}
+
 function auditLabel(type) {
   const labels = {
     "node.enrolled": "设备登记",
@@ -297,6 +307,7 @@ function render() {
   dom.nodeRange.textContent = safeTotals.nodes > 0 ? `${safeTotals.nodes} 台电脑` : "等待上报";
   renderAttention(dashboard.nodes);
   renderNodes(dashboard.nodes);
+  renderDiagnostics(dashboard.nodes);
   renderDetail();
   renderInstallProfile();
 }
@@ -428,6 +439,89 @@ function renderNodes(nodes) {
       </article>
     `;
   }).join("");
+}
+
+function renderDiagnostics(nodes) {
+  if (!dom.syncDiagnostics) return;
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    dom.syncDiagnostics.innerHTML = `
+      <div class="section-head">
+        <div>
+          <h2>同步诊断</h2>
+          <p>还没有电脑接入，暂时无法检查同步链路。</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  const danger = nodes.filter((node) => node.syncHealth?.overall === "danger").length;
+  const warning = nodes.filter((node) => node.syncHealth?.overall === "warning").length;
+  const ok = nodes.length - danger - warning;
+  dom.syncDiagnostics.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h2>同步诊断</h2>
+        <p>检查手机端、云端、桌面端、Farfield 和 Codex 会话是否闭环。</p>
+      </div>
+      <span class="pill">${ok} 正常 · ${warning} 注意 · ${danger} 异常</span>
+    </div>
+    <div class="diagnostic-list">
+      ${nodes.map(renderDiagnosticCard).join("")}
+    </div>
+  `;
+}
+
+function renderDiagnosticCard(node) {
+  const health = node.syncHealth ?? {};
+  const label = syncLabel(health.overall);
+  const latest = health.latestThread;
+  const counts = health.commandCounts ?? {};
+  const recent = health.recentCommand;
+  const checks = Array.isArray(health.checks) ? health.checks : [];
+  return `
+    <article class="diagnostic-card" data-node="${escapeHtml(node.id)}">
+      <div class="card-top">
+        <div class="task-title">
+          <strong>${escapeHtml(node.name)}</strong>
+          <span>${escapeHtml(hostLabel(node))} · ${timeAgo(node.lastSeenAt)}</span>
+        </div>
+        <span class="status-chip ${label.className}">${label.text}</span>
+      </div>
+      <div class="diagnostic-checks">
+        ${checks.map((check) => {
+          const checkLabel = syncLabel(check.state);
+          return `
+            <div class="diagnostic-check ${escapeHtml(check.state || "unknown")}">
+              <strong>${escapeHtml(check.label)}</strong>
+              <span>${escapeHtml(check.detail || "")}</span>
+              <em>${timeAgo(check.at)}</em>
+              <i class="status-chip ${checkLabel.className}">${checkLabel.text}</i>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      <div class="diagnostic-meta">
+        <span>任务 ${node.metrics?.totalThreads ?? node.threads?.length ?? 0}</span>
+        <span>运行 ${node.metrics?.running ?? 0}</span>
+        <span>未读 ${health.unreadNotifications ?? 0}</span>
+        <span>命令 ${Number(counts.queued ?? 0) + Number(counts.leased ?? 0)} 等待 / ${counts.failed ?? 0} 失败</span>
+      </div>
+      ${latest ? `
+        <div class="diagnostic-latest">
+          <span>最近任务 · ${timeAgo(latest.at)}</span>
+          <strong>${escapeHtml(threadTitle(latest))}</strong>
+          <p>${escapeHtml(threadSummary(latest))}</p>
+        </div>
+      ` : `<p class="preview">没有可诊断的最近任务。</p>`}
+      ${recent ? `
+        <div class="diagnostic-command">
+          <span>最近命令</span>
+          <strong>${escapeHtml(recent.kind)} · ${escapeHtml(recent.status)}</strong>
+          <p>${escapeHtml(recent.error || timeAgo(recent.completedAt || recent.leasedAt || recent.createdAt))}</p>
+        </div>
+      ` : ""}
+    </article>
+  `;
 }
 
 function renderDetail() {
@@ -874,6 +968,7 @@ document.querySelectorAll("[data-view]").forEach((button) => {
     document.querySelectorAll("[data-view]").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
     if (view === "nodes") document.querySelector(".nodes-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (view === "attention") document.querySelector(".attention-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (view === "diagnostics") document.querySelector(".diagnostics-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 });
 
