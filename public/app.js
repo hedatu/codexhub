@@ -163,6 +163,10 @@ function threadSummary(thread) {
   return compactText(thread.preview || thread.cwd || thread.source || thread.provider, 120) || "暂无摘要";
 }
 
+function threadActivityTime(thread) {
+  return toMillis(thread.latestFinalMessageAt || thread.latestProgressMessageAt || thread.latestMessageAt || thread.updatedAt || thread.createdAt);
+}
+
 function auditLabel(type) {
   const labels = {
     "node.enrolled": "设备登记",
@@ -248,6 +252,12 @@ function scheduleStateRefresh(delay = 300) {
     state.refreshTimer = null;
     loadState();
   }, delay);
+}
+
+function scheduleFollowUpRefreshes(delays = [2500, 6500]) {
+  for (const delay of delays) {
+    setTimeout(() => loadState(), delay);
+  }
 }
 
 function setConnection(ok, text) {
@@ -503,7 +513,7 @@ function renderThreadList(node) {
   if (node.threads.length === 0) {
     return `<h3>最近任务</h3><p class="preview">该节点还没有上报线程。</p>`;
   }
-  const threads = [...node.threads].sort((a, b) => toMillis(b.updatedAt || b.createdAt) - toMillis(a.updatedAt || a.createdAt));
+  const threads = [...node.threads].sort((a, b) => threadActivityTime(b) - threadActivityTime(a));
   return `
     <div class="thread-list compact">
       ${threads.slice(0, 8).map((thread) => {
@@ -650,6 +660,30 @@ async function queueAction(nodeId, action) {
   await loadState();
 }
 
+async function requestDesktopRefresh() {
+  if (!isConfigured()) {
+    await loadState();
+    return;
+  }
+  const nodes = (state.dashboard?.nodes ?? []).filter((node) => node.status === "online");
+  if (nodes.length === 0) {
+    showToast("没有在线电脑，已刷新云端缓存");
+    await loadState();
+    return;
+  }
+  const results = await Promise.allSettled(nodes.map((node) =>
+    apiFetch(`/api/nodes/${encodeURIComponent(node.id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ kind: "refresh", provider: "codex" }),
+    }),
+  ));
+  const queued = results.filter((result) => result.status === "fulfilled").length;
+  const failed = results.length - queued;
+  showToast(failed > 0 ? `已请求 ${queued} 台电脑重新采集，${failed} 台失败` : `已请求 ${queued} 台电脑重新采集`);
+  await loadState();
+  scheduleFollowUpRefreshes();
+}
+
 async function updateNode(nodeId, body) {
   await apiFetch(`/api/nodes/${encodeURIComponent(nodeId)}/update`, {
     method: "POST",
@@ -711,7 +745,7 @@ dom.settingsBtn.addEventListener("click", () => {
   }
 });
 
-dom.refreshBtn.addEventListener("click", loadState);
+dom.refreshBtn.addEventListener("click", requestDesktopRefresh);
 dom.statusFilter.addEventListener("change", render);
 dom.closeDetailBtn.addEventListener("click", () => dom.detailPane.classList.remove("open"));
 dom.markAllReadBtn?.addEventListener("click", markAllNotificationsRead);

@@ -39,6 +39,14 @@ type app struct {
 	client *http.Client
 }
 
+type sessionMessage struct {
+	Text  string
+	At    any
+	Phase string
+}
+
+var sessionFileIndex map[string]string
+
 func main() {
 	cfg := loadConfig()
 	agent := &app{cfg: cfg, client: &http.Client{Timeout: 20 * time.Second}}
@@ -232,6 +240,7 @@ func (a *app) executeCommand(command codexhub.Command) (any, error) {
 	kind := stringValue(command.Action["kind"])
 	switch kind {
 	case "refresh":
+		sessionFileIndex = nil
 		return map[string]any{"ok": true, "skipped": false, "message": "refresh acknowledged"}, nil
 	case "sendMessage", "interrupt", "submitUserInput":
 		return a.forwardUnifiedCommand(command.Action)
@@ -327,25 +336,221 @@ func normalizeThreads(sidebar map[string]any, health map[string]any, provider st
 		if p == "" {
 			p = provider
 		}
+		latest := readLatestSessionMessage(id)
+		latestFinalAt := valueTime(latest.LatestFinalMessageAt)
+		latestProgressAt := valueTime(latest.LatestProgressMessageAt)
+		hasFreshFinal := latestFinalAt > 0 && latestFinalAt >= latestProgressAt
 		isGenerating := boolValue(row["isGenerating"])
-		if clearGenerating {
+		if clearGenerating && hasFreshFinal {
 			isGenerating = false
 		}
 		threads = append(threads, codexhub.Thread{
-			ID:                 id,
-			Provider:           p,
-			Title:              first(row, "title", "name"),
-			Preview:            stringValue(row["preview"]),
-			CWD:                stringValue(row["cwd"]),
-			Source:             stringValue(row["source"]),
-			CreatedAt:          row["createdAt"],
-			UpdatedAt:          row["updatedAt"],
-			IsGenerating:       isGenerating,
-			WaitingOnApproval:  boolValue(row["waitingOnApproval"]),
-			WaitingOnUserInput: boolValue(row["waitingOnUserInput"]),
+			ID:                      id,
+			Provider:                p,
+			Title:                   first(row, "title", "name"),
+			Preview:                 stringValue(row["preview"]),
+			CWD:                     stringValue(row["cwd"]),
+			Source:                  stringValue(row["source"]),
+			CreatedAt:               row["createdAt"],
+			UpdatedAt:               row["updatedAt"],
+			LatestMessage:           latest.LatestMessage,
+			LatestMessageAt:         latest.LatestMessageAt,
+			LatestMessagePhase:      latest.LatestMessagePhase,
+			LatestFinalMessage:      latest.LatestFinalMessage,
+			LatestFinalMessageAt:    latest.LatestFinalMessageAt,
+			LatestProgressMessage:   latest.LatestProgressMessage,
+			LatestProgressMessageAt: latest.LatestProgressMessageAt,
+			IsGenerating:            isGenerating,
+			WaitingOnApproval:       boolValue(row["waitingOnApproval"]),
+			WaitingOnUserInput:      boolValue(row["waitingOnUserInput"]),
 		})
 	}
 	return threads
+}
+
+func sessionRoot() string {
+	return filepath.Join(env("CODEX_HOME", filepath.Join(homeDir(), ".codex")), "sessions")
+}
+
+func buildSessionFileIndex() map[string]string {
+	index := map[string]string{}
+	_ = filepath.WalkDir(sessionRoot(), func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".jsonl") {
+			return nil
+		}
+		threadID := strings.TrimSuffix(name, ".jsonl")
+		if looksLikeUUID(threadID) {
+			index[threadID] = path
+		}
+		return nil
+	})
+	return index
+}
+
+func looksLikeUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, ch := range value {
+		switch index {
+		case 8, 13, 18, 23:
+			if ch != '-' {
+				return false
+			}
+		default:
+			if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func sessionFileForThread(threadID string) string {
+	if sessionFileIndex == nil {
+		sessionFileIndex = buildSessionFileIndex()
+	}
+	if path := sessionFileIndex[threadID]; path != "" {
+		return path
+	}
+	sessionFileIndex = buildSessionFileIndex()
+	return sessionFileIndex[threadID]
+}
+
+func readLatestSessionMessage(threadID string) codexhub.Thread {
+	filePath := sessionFileForThread(threadID)
+	if filePath == "" {
+		return codexhub.Thread{}
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return codexhub.Thread{}
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	var latestFinal *sessionMessage
+	var latestProgress *sessionMessage
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		decoder := json.NewDecoder(strings.NewReader(line))
+		decoder.UseNumber()
+		if err := decoder.Decode(&event); err != nil {
+			continue
+		}
+		payload, _ := event["payload"].(map[string]any)
+		text := extractSessionMessageText(payload)
+		if text == "" {
+			continue
+		}
+		if len(text) > 1800 {
+			text = text[:1800] + "..."
+		}
+		entry := &sessionMessage{
+			Text:  text,
+			At:    event["timestamp"],
+			Phase: stringValue(payload["phase"]),
+		}
+		if latestFinal == nil && entry.Phase == "final_answer" {
+			latestFinal = entry
+		} else if latestProgress == nil && entry.Phase != "final_answer" {
+			latestProgress = entry
+		}
+		if latestFinal != nil && latestProgress != nil {
+			break
+		}
+	}
+	preferred := latestFinal
+	if preferred == nil {
+		preferred = latestProgress
+	}
+	if preferred == nil {
+		return codexhub.Thread{}
+	}
+	thread := codexhub.Thread{
+		LatestMessage:      preferred.Text,
+		LatestMessageAt:    preferred.At,
+		LatestMessagePhase: preferred.Phase,
+	}
+	if latestFinal != nil {
+		thread.LatestFinalMessage = latestFinal.Text
+		thread.LatestFinalMessageAt = latestFinal.At
+	}
+	if latestProgress != nil {
+		thread.LatestProgressMessage = latestProgress.Text
+		thread.LatestProgressMessageAt = latestProgress.At
+	}
+	return thread
+}
+
+func extractSessionMessageText(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if stringValue(payload["type"]) == "agent_message" {
+		return strings.TrimSpace(stringValue(payload["message"]))
+	}
+	if stringValue(payload["type"]) != "message" || stringValue(payload["role"]) != "assistant" {
+		return ""
+	}
+	texts := []string{}
+	for _, partAny := range anySlice(payload["content"]) {
+		part, ok := partAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text := strings.TrimSpace(stringValue(part["text"])); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+func valueTime(value any) int64 {
+	switch v := value.(type) {
+	case int:
+		return numericMillis(float64(v))
+	case int64:
+		return numericMillis(float64(v))
+	case float64:
+		return numericMillis(v)
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return 0
+		}
+		return numericMillis(n)
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0
+		}
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return numericMillis(n)
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return parsed.UnixMilli()
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+func numericMillis(value float64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	if value < 10_000_000_000 {
+		return int64(value * 1000)
+	}
+	return int64(value)
 }
 
 func farfieldHasNoActiveTrace(health map[string]any) bool {

@@ -146,26 +146,38 @@ function farfieldHasNoActiveTrace(health) {
   return Object.prototype.hasOwnProperty.call(farfieldState, "activeTrace") && farfieldState.activeTrace == null;
 }
 
+function valueTime(value) {
+  if (!value) return 0;
+  if (typeof value === "number") return value < 10_000_000_000 ? value * 1000 : value;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function normalizeThreads(sidebar, health) {
   const rows = sidebar?.rows ?? sidebar?.data ?? sidebar?.threads ?? [];
   if (!Array.isArray(rows)) return [];
   const clearGenerating = farfieldHasNoActiveTrace(health);
-  return rows.map((thread) => ({
-    id: String(thread.id ?? ""),
-    provider: thread.provider ?? PROVIDER,
-    title: thread.title ?? thread.name ?? null,
-    preview: thread.preview ?? "",
-    cwd: thread.cwd ?? "",
-    source: thread.source ?? "",
-    createdAt: thread.createdAt ?? null,
-    updatedAt: thread.updatedAt ?? null,
-    isGenerating: clearGenerating ? false : Boolean(thread.isGenerating),
-    waitingOnApproval: Boolean(thread.waitingOnApproval),
-    waitingOnUserInput: Boolean(thread.waitingOnUserInput),
-  })).filter((thread) => thread.id).map((thread) => ({
-    ...thread,
-    ...readLatestSessionMessage(thread.id),
-  }));
+  return rows.map((thread) => {
+    const id = String(thread.id ?? "");
+    const latest = id ? readLatestSessionMessage(id) : {};
+    const latestFinalAt = valueTime(latest.latestFinalMessageAt);
+    const latestProgressAt = valueTime(latest.latestProgressMessageAt);
+    const hasFreshFinal = latestFinalAt > 0 && latestFinalAt >= latestProgressAt;
+    return {
+      id,
+      provider: thread.provider ?? PROVIDER,
+      title: thread.title ?? thread.name ?? null,
+      preview: thread.preview ?? "",
+      cwd: thread.cwd ?? "",
+      source: thread.source ?? "",
+      createdAt: thread.createdAt ?? null,
+      updatedAt: thread.updatedAt ?? null,
+      isGenerating: Boolean(thread.isGenerating) && !(clearGenerating && hasFreshFinal),
+      waitingOnApproval: Boolean(thread.waitingOnApproval),
+      waitingOnUserInput: Boolean(thread.waitingOnUserInput),
+      ...latest,
+    };
+  }).filter((thread) => thread.id);
 }
 
 function buildSessionFileIndex() {
@@ -194,6 +206,9 @@ function buildSessionFileIndex() {
 
 function sessionFileForThread(threadId) {
   if (!sessionFileIndex) sessionFileIndex = buildSessionFileIndex();
+  const cached = sessionFileIndex.get(threadId);
+  if (cached) return cached;
+  sessionFileIndex = buildSessionFileIndex();
   return sessionFileIndex.get(threadId) ?? null;
 }
 
@@ -305,6 +320,8 @@ async function collectSnapshot() {
 async function executeCommand(command) {
   const action = command.action ?? {};
   if (action.kind === "refresh") {
+    sessionFileIndex = null;
+    SESSION_CACHE.clear();
     return { ok: true, skipped: false, message: "refresh acknowledged" };
   }
 

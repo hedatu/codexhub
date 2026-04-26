@@ -418,11 +418,12 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request, nodeID 
 	}
 	node.Version = body["version"]
 	node.Host = body["host"]
+	previousLastSeenAt := node.LastSeenAt
 	node.LastSeenAt = nowISO()
 	node.Farfield = body["farfield"]
 	node.Metrics = mapValue(body["metrics"])
 	nextThreads := normalizeThreads(body["threads"])
-	updateThreadNotificationsLocked(node, node.Threads, nextThreads)
+	updateThreadNotificationsLocked(node, node.Threads, nextThreads, previousLastSeenAt)
 	node.Threads = nextThreads
 	node.LastError = body["lastError"]
 	s.cleanupCommandsLocked(node)
@@ -1023,17 +1024,28 @@ func normalizeThreads(value any) []codexhub.Thread {
 	return threads
 }
 
-func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []codexhub.Thread, nextThreads []codexhub.Thread) {
+func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []codexhub.Thread, nextThreads []codexhub.Thread, previousLastSeenAt string) {
 	previousByID := map[string]codexhub.Thread{}
 	for _, t := range previousThreads {
 		previousByID[t.ID] = t
 	}
+	previousLastSeenMs := anyTimeMillis(previousLastSeenAt)
 	for _, t := range nextThreads {
 		previous, ok := previousByID[t.ID]
+		threadUpdatedAt := firstNonZero(t.LatestFinalMessageAt, t.LatestMessageAt, t.UpdatedAt, t.CreatedAt)
 		if !ok {
+			finalAt := anyTimeMillis(t.LatestFinalMessageAt)
+			if !t.IsGenerating && previousLastSeenMs > 0 && finalAt > previousLastSeenMs {
+				addNodeNotificationLocked(node, codexhub.Notification{
+					Type:            "completed",
+					ThreadID:        t.ID,
+					ThreadUpdatedAt: firstNonZero(t.LatestFinalMessageAt, threadUpdatedAt),
+					Title:           notificationTitle(t),
+					Preview:         firstNonEmptyString(t.LatestFinalMessage, t.LatestMessage, t.Preview, "任务已结束，等待查看。"),
+				})
+			}
 			continue
 		}
-		threadUpdatedAt := firstNonZero(t.LatestFinalMessageAt, t.LatestMessageAt, t.UpdatedAt, t.CreatedAt)
 		switch {
 		case previous.IsGenerating && !t.IsGenerating:
 			addNodeNotificationLocked(node, codexhub.Notification{

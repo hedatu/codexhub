@@ -286,12 +286,25 @@ function addNodeNotification(node, notification) {
   node.notifications = node.notifications.slice(-100);
 }
 
-function updateThreadNotifications(node, previousThreads, nextThreads) {
+function updateThreadNotifications(node, previousThreads, nextThreads, previousLastSeenAt = null) {
   const previousById = new Map(previousThreads.map((thread) => [thread.id, thread]));
+  const previousLastSeenMs = valueTime(previousLastSeenAt);
   for (const thread of nextThreads) {
     const previous = previousById.get(thread.id);
-    if (!previous) continue;
     const threadUpdatedAt = thread.latestFinalMessageAt ?? thread.latestMessageAt ?? thread.updatedAt ?? thread.createdAt ?? null;
+    if (!previous) {
+      const finalAt = valueTime(thread.latestFinalMessageAt);
+      if (!thread.isGenerating && previousLastSeenMs > 0 && finalAt > previousLastSeenMs) {
+        addNodeNotification(node, {
+          type: "completed",
+          threadId: thread.id,
+          threadUpdatedAt: thread.latestFinalMessageAt ?? threadUpdatedAt,
+          title: notificationTitle(thread),
+          preview: thread.latestFinalMessage || thread.latestMessage || thread.preview || "任务已结束，等待查看。",
+        });
+      }
+      continue;
+    }
     if (previous.isGenerating && !thread.isGenerating) {
       addNodeNotification(node, {
         type: "completed",
@@ -671,12 +684,13 @@ const server = http.createServer(async (req, res) => {
           node.tags = Array.isArray(body.tags) ? body.tags : node.tags ?? [];
           node.version = body.version ?? node.version ?? null;
           node.host = body.host ?? node.host ?? null;
+          const previousLastSeenAt = node.lastSeenAt ?? null;
           node.lastSeenAt = nowIso();
           node.farfield = body.farfield ?? null;
           node.metrics = body.metrics ?? {};
           const previousThreads = Array.isArray(node.threads) ? node.threads.map(normalizeThread) : [];
           const nextThreads = Array.isArray(body.threads) ? body.threads.map(normalizeThread) : [];
-          updateThreadNotifications(node, previousThreads, nextThreads);
+          updateThreadNotifications(node, previousThreads, nextThreads, previousLastSeenAt);
           node.threads = nextThreads;
           node.lastError = body.lastError ?? null;
           cleanupCommands(node);
