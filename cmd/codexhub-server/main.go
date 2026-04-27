@@ -1,16 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,39 +32,58 @@ import (
 var version = "dev"
 
 type serverConfig struct {
-	Root          string
-	PublicDir     string
-	Host          string
-	Port          int
-	PublicURL     string
-	AdminToken    string
-	ReadonlyToken string
-	InstallKey    string
-	DataFile      string
-	OfflineAfter  time.Duration
-	CommandTTL    time.Duration
-	CommandLease  time.Duration
+	Root                  string
+	PublicDir             string
+	Host                  string
+	Port                  int
+	PublicURL             string
+	AdminToken            string
+	ReadonlyToken         string
+	InstallKey            string
+	DataFile              string
+	StorageDriver         string
+	SQLiteFile            string
+	PushWebhookURL        string
+	FCMServiceAccountFile string
+	FCMServiceAccountJSON string
+	FCMProjectID          string
+	FirebaseWebConfig     string
+	FirebaseVapidKey      string
+	SQLiteMinPersist      time.Duration
+	OfflineAfter          time.Duration
+	CommandTTL            time.Duration
+	CommandLease          time.Duration
 }
 
 type appState struct {
-	startedAt  string
-	nodes      map[string]*codexhub.Node
-	auditLogs  []codexhub.AuditEntry
-	installKey string
-	clients    map[chan []byte]bool
-	mu         sync.RWMutex
+	startedAt         string
+	nodes             map[string]*codexhub.Node
+	auditLogs         []codexhub.AuditEntry
+	pushSubscriptions []codexhub.PushSubscription
+	installKey        string
+	clients           map[chan []byte]bool
+	mu                sync.RWMutex
 }
 
 type persistedState struct {
-	SavedAt    string                `json:"savedAt"`
-	InstallKey string                `json:"installKey,omitempty"`
-	AuditLogs  []codexhub.AuditEntry `json:"auditLogs"`
-	Nodes      []codexhub.Node       `json:"nodes"`
+	SavedAt           string                      `json:"savedAt"`
+	SchemaVersion     int                         `json:"schemaVersion,omitempty"`
+	StorageDriver     string                      `json:"storageDriver,omitempty"`
+	InstallKey        string                      `json:"installKey,omitempty"`
+	AuditLogs         []codexhub.AuditEntry       `json:"auditLogs"`
+	PushSubscriptions []codexhub.PushSubscription `json:"pushSubscriptions,omitempty"`
+	Nodes             []codexhub.Node             `json:"nodes"`
 }
 
 type server struct {
-	cfg   serverConfig
-	state *appState
+	cfg                     serverConfig
+	state                   *appState
+	sqliteMu                sync.Mutex
+	sqliteThrottleMu        sync.Mutex
+	lastSQLitePersist       time.Time
+	fcmMu                   sync.Mutex
+	fcmAccessToken          string
+	fcmAccessTokenExpiresAt time.Time
 }
 
 func main() {
@@ -92,19 +119,32 @@ func loadConfig() serverConfig {
 	}
 	admin := env("CODEXHUB_ADMIN_TOKEN", env("CODEXHUB_TOKEN", "dev-token"))
 	install := env("CODEXHUB_INSTALL_KEY", env("CODEXHUB_TOKEN", admin))
+	sqliteFile := os.Getenv("CODEXHUB_SQLITE_FILE")
+	if sqliteFile == "" {
+		sqliteFile = filepath.Join(root, "data", "codexhub.db")
+	}
 	return serverConfig{
-		Root:          root,
-		PublicDir:     filepath.Join(root, "public"),
-		Host:          env("CODEXHUB_HOST", "0.0.0.0"),
-		Port:          port,
-		PublicURL:     stripSlash(os.Getenv("CODEXHUB_PUBLIC_URL")),
-		AdminToken:    admin,
-		ReadonlyToken: strings.TrimSpace(os.Getenv("CODEXHUB_READONLY_TOKEN")),
-		InstallKey:    install,
-		DataFile:      os.Getenv("CODEXHUB_DATA_FILE"),
-		OfflineAfter:  envDuration("CODEXHUB_OFFLINE_AFTER_MS", 45*time.Second),
-		CommandTTL:    envDuration("CODEXHUB_COMMAND_TTL_MS", 10*time.Minute),
-		CommandLease:  envDuration("CODEXHUB_COMMAND_LEASE_MS", time.Minute),
+		Root:                  root,
+		PublicDir:             filepath.Join(root, "public"),
+		Host:                  env("CODEXHUB_HOST", "0.0.0.0"),
+		Port:                  port,
+		PublicURL:             stripSlash(os.Getenv("CODEXHUB_PUBLIC_URL")),
+		AdminToken:            admin,
+		ReadonlyToken:         strings.TrimSpace(os.Getenv("CODEXHUB_READONLY_TOKEN")),
+		InstallKey:            install,
+		DataFile:              os.Getenv("CODEXHUB_DATA_FILE"),
+		StorageDriver:         strings.ToLower(env("CODEXHUB_STORAGE", "json")),
+		SQLiteFile:            sqliteFile,
+		PushWebhookURL:        strings.TrimSpace(os.Getenv("CODEXHUB_PUSH_WEBHOOK_URL")),
+		FCMServiceAccountFile: strings.TrimSpace(os.Getenv("CODEXHUB_FCM_SERVICE_ACCOUNT_FILE")),
+		FCMServiceAccountJSON: strings.TrimSpace(os.Getenv("CODEXHUB_FCM_SERVICE_ACCOUNT_JSON")),
+		FCMProjectID:          strings.TrimSpace(os.Getenv("CODEXHUB_FCM_PROJECT_ID")),
+		FirebaseWebConfig:     strings.TrimSpace(os.Getenv("CODEXHUB_FIREBASE_WEB_CONFIG")),
+		FirebaseVapidKey:      strings.TrimSpace(os.Getenv("CODEXHUB_FIREBASE_VAPID_KEY")),
+		SQLiteMinPersist:      envDuration("CODEXHUB_SQLITE_MIN_PERSIST_MS", 15*time.Second),
+		OfflineAfter:          envDuration("CODEXHUB_OFFLINE_AFTER_MS", 45*time.Second),
+		CommandTTL:            envDuration("CODEXHUB_COMMAND_TTL_MS", 10*time.Minute),
+		CommandLease:          envDuration("CODEXHUB_COMMAND_LEASE_MS", time.Minute),
 	}
 }
 
@@ -168,8 +208,27 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	if path == "/api/health" {
 		s.state.mu.RLock()
 		nodes := len(s.state.nodes)
+		subscriptions := 0
+		for _, item := range s.state.pushSubscriptions {
+			if item.RevokedAt == "" {
+				subscriptions++
+			}
+		}
 		s.state.mu.RUnlock()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version, "startedAt": s.state.startedAt, "nodes": nodes, "authRequired": true})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"version": env("CODEXHUB_VERSION", version),
+			"storage": s.storageStatus(),
+			"push": map[string]any{
+				"webhookConfigured":     s.cfg.PushWebhookURL != "",
+				"fcmConfigured":         s.fcmConfigured(),
+				"firebaseWebConfigured": s.cfg.FirebaseWebConfig != "" && s.cfg.FirebaseVapidKey != "",
+				"subscriptions":         subscriptions,
+			},
+			"startedAt":    s.state.startedAt,
+			"nodes":        nodes,
+			"authRequired": true,
+		})
 		return
 	}
 	if path == "/api/events" {
@@ -203,6 +262,12 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleInstallKeyRotate(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/audit":
 		s.handleAudit(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/push/config":
+		s.handlePushConfig(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/push/register":
+		s.handlePushRegister(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/push/test":
+		s.handlePushTest(w, r)
 	default:
 		s.handleNodeAPI(w, r)
 	}
@@ -262,6 +327,342 @@ func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		logs[i], logs[j] = logs[j], logs[i]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "auditLogs": logs})
+}
+
+func (s *server) handlePushConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.isReadAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	var webConfig any
+	if s.cfg.FirebaseWebConfig != "" {
+		_ = json.Unmarshal([]byte(s.cfg.FirebaseWebConfig), &webConfig)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"fcmConfigured":     s.fcmConfigured(),
+		"firebaseWebConfig": webConfig,
+		"vapidKey":          nullableString(s.cfg.FirebaseVapidKey),
+	})
+}
+
+func (s *server) handlePushRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	token := strings.TrimSpace(stringValue(body["token"]))
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("Missing push token"))
+		return
+	}
+	kind := strings.TrimSpace(stringValue(body["type"]))
+	if kind == "" {
+		kind = "fcm"
+	}
+	now := nowISO()
+	s.state.mu.Lock()
+	found := false
+	for i := range s.state.pushSubscriptions {
+		item := &s.state.pushSubscriptions[i]
+		if item.Type == kind && item.Token == token {
+			item.RevokedAt = ""
+			item.UpdatedAt = now
+			item.Label = body["label"]
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.state.pushSubscriptions = append(s.state.pushSubscriptions, codexhub.PushSubscription{
+			ID: uuid(), Type: kind, Token: token, Label: body["label"], CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	if len(s.state.pushSubscriptions) > 200 {
+		s.state.pushSubscriptions = s.state.pushSubscriptions[len(s.state.pushSubscriptions)-200:]
+	}
+	count := 0
+	for _, item := range s.state.pushSubscriptions {
+		if item.RevokedAt == "" {
+			count++
+		}
+	}
+	s.recordAuditLocked("push.registered", "admin", map[string]any{"type": kind, "label": body["label"]})
+	s.state.mu.Unlock()
+	s.persistState()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "subscriptions": count})
+}
+
+func (s *server) handlePushTest(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	go s.deliverNotification(map[string]any{
+		"type":      "test",
+		"title":     "CodexHub 测试通知",
+		"preview":   "云端通知通道已触发。",
+		"createdAt": nowISO(),
+	})
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "queued": true})
+}
+
+func (s *server) notificationPayload(nodeID string, publicNode map[string]any, notice codexhub.Notification) map[string]any {
+	nodeName := stringValue(publicNode["name"])
+	if nodeName == "" {
+		nodeName = nodeID
+	}
+	return map[string]any{
+		"id":              notice.ID,
+		"type":            notice.Type,
+		"title":           notice.Title,
+		"preview":         notice.Preview,
+		"createdAt":       notice.CreatedAt,
+		"threadId":        notice.ThreadID,
+		"threadUpdatedAt": notice.ThreadUpdatedAt,
+		"nodeId":          nodeID,
+		"nodeName":        nodeName,
+	}
+}
+
+func (s *server) deliverNotification(notification map[string]any) {
+	payload := map[string]any{"version": env("CODEXHUB_VERSION", version), "sentAt": nowISO(), "notification": notification}
+	results := []map[string]any{}
+	if s.cfg.PushWebhookURL != "" {
+		results = append(results, s.postJSONExternal(s.cfg.PushWebhookURL, payload, nil))
+	}
+	tokens := s.activeFCMTokens()
+	if s.fcmConfigured() && len(tokens) > 0 {
+		for i, token := range tokens {
+			if i >= 500 {
+				break
+			}
+			results = append(results, s.sendFCMMessage(token, notification))
+		}
+	}
+	if len(results) == 0 {
+		return
+	}
+	s.state.mu.Lock()
+	s.recordAuditLocked("push.delivered", "system", map[string]any{
+		"type":     notification["type"],
+		"nodeId":   notification["nodeId"],
+		"threadId": notification["threadId"],
+		"results":  results,
+	})
+	s.state.mu.Unlock()
+	s.persistState()
+}
+
+func (s *server) activeFCMTokens() []string {
+	s.state.mu.RLock()
+	defer s.state.mu.RUnlock()
+	tokens := []string{}
+	for _, item := range s.state.pushSubscriptions {
+		if item.Type == "fcm" && item.Token != "" && item.RevokedAt == "" {
+			tokens = append(tokens, item.Token)
+		}
+	}
+	return tokens
+}
+
+func (s *server) postJSONExternal(target string, payload any, headers map[string]string) map[string]any {
+	data, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(data))
+	if err != nil {
+		return map[string]any{"provider": "webhook", "ok": false, "error": err.Error()}
+	}
+	req.Header.Set("content-type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return map[string]any{"provider": "webhook", "ok": false, "error": err.Error()}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	return map[string]any{"provider": "webhook", "ok": resp.StatusCode >= 200 && resp.StatusCode < 300, "status": resp.StatusCode, "text": string(body)}
+}
+
+type fcmServiceAccount struct {
+	ProjectID   string `json:"project_id"`
+	ClientEmail string `json:"client_email"`
+	PrivateKey  string `json:"private_key"`
+	TokenURI    string `json:"token_uri"`
+}
+
+func (s *server) loadFCMServiceAccount() (*fcmServiceAccount, error) {
+	raw := s.cfg.FCMServiceAccountJSON
+	if raw == "" && s.cfg.FCMServiceAccountFile != "" {
+		data, err := os.ReadFile(s.cfg.FCMServiceAccountFile)
+		if err != nil {
+			return nil, err
+		}
+		raw = string(data)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("FCM service account is not configured")
+	}
+	var account fcmServiceAccount
+	if err := json.Unmarshal([]byte(raw), &account); err != nil {
+		return nil, err
+	}
+	if account.ClientEmail == "" || account.PrivateKey == "" {
+		return nil, fmt.Errorf("FCM service account is missing client_email or private_key")
+	}
+	return &account, nil
+}
+
+func (s *server) fcmProjectID(account *fcmServiceAccount) string {
+	if s.cfg.FCMProjectID != "" {
+		return s.cfg.FCMProjectID
+	}
+	if account != nil {
+		return account.ProjectID
+	}
+	return ""
+}
+
+func (s *server) fcmConfigured() bool {
+	account, err := s.loadFCMServiceAccount()
+	return err == nil && s.fcmProjectID(account) != ""
+}
+
+func (s *server) getFCMAccessToken() (string, error) {
+	s.fcmMu.Lock()
+	defer s.fcmMu.Unlock()
+	if s.fcmAccessToken != "" && time.Now().Before(s.fcmAccessTokenExpiresAt.Add(-time.Minute)) {
+		return s.fcmAccessToken, nil
+	}
+	account, err := s.loadFCMServiceAccount()
+	if err != nil {
+		return "", err
+	}
+	tokenURI := account.TokenURI
+	if tokenURI == "" {
+		tokenURI = "https://oauth2.googleapis.com/token"
+	}
+	now := time.Now().Unix()
+	header := base64URLJSON(map[string]any{"alg": "RS256", "typ": "JWT"})
+	claims := base64URLJSON(map[string]any{
+		"iss":   account.ClientEmail,
+		"scope": "https://www.googleapis.com/auth/firebase.messaging",
+		"aud":   tokenURI,
+		"iat":   now,
+		"exp":   now + 3600,
+	})
+	unsigned := header + "." + claims
+	key, err := parseRSAPrivateKey(account.PrivateKey)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(unsigned))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
+	if err != nil {
+		return "", err
+	}
+	assertion := unsigned + "." + base64.RawURLEncoding.EncodeToString(sig)
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+	form.Set("assertion", assertion)
+	req, err := http.NewRequest(http.MethodPost, tokenURI, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("FCM OAuth failed: %s", stringValue(first(payload, "error_description", "error")))
+	}
+	token := stringValue(payload["access_token"])
+	if token == "" {
+		return "", fmt.Errorf("FCM OAuth returned no access_token")
+	}
+	expires := intNumber(payload["expires_in"])
+	if expires <= 0 {
+		expires = 3600
+	}
+	s.fcmAccessToken = token
+	s.fcmAccessTokenExpiresAt = time.Now().Add(time.Duration(expires) * time.Second)
+	return token, nil
+}
+
+func (s *server) sendFCMMessage(token string, notification map[string]any) map[string]any {
+	account, err := s.loadFCMServiceAccount()
+	if err != nil {
+		return map[string]any{"provider": "fcm", "ok": false, "error": err.Error()}
+	}
+	projectID := s.fcmProjectID(account)
+	if projectID == "" {
+		return map[string]any{"provider": "fcm", "ok": false, "error": "FCM project id is missing"}
+	}
+	accessToken, err := s.getFCMAccessToken()
+	if err != nil {
+		return map[string]any{"provider": "fcm", "ok": false, "error": err.Error()}
+	}
+	message := map[string]any{
+		"token": token,
+		"notification": map[string]string{
+			"title": firstNonEmptyString(stringValue(notification["title"]), "CodexHub"),
+			"body":  firstNonEmptyString(stringValue(notification["preview"]), "有新的待处理事项"),
+		},
+		"data": map[string]string{
+			"nodeId":   stringValue(notification["nodeId"]),
+			"threadId": stringValue(notification["threadId"]),
+			"type":     firstNonEmptyString(stringValue(notification["type"]), "notification"),
+			"url":      "/",
+		},
+	}
+	if s.cfg.PublicURL != "" {
+		message["webpush"] = map[string]any{"fcm_options": map[string]string{"link": s.cfg.PublicURL}}
+	}
+	body := map[string]any{"message": message}
+	target := fmt.Sprintf("https://fcm.googleapis.com/v1/projects/%s/messages:send", projectID)
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(data))
+	if err != nil {
+		return map[string]any{"provider": "fcm", "ok": false, "error": err.Error()}
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("authorization", "Bearer "+accessToken)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return map[string]any{"provider": "fcm", "ok": false, "error": err.Error()}
+	}
+	defer resp.Body.Close()
+	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	return map[string]any{"provider": "fcm", "ok": resp.StatusCode >= 200 && resp.StatusCode < 300, "status": resp.StatusCode, "text": string(responseBody)}
+}
+
+func base64URLJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func parseRSAPrivateKey(pemText string) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(pemText))
+	if block == nil {
+		return nil, fmt.Errorf("invalid PEM private key")
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+	}
+	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }
 
 func (s *server) handleInstallKeyRotate(w http.ResponseWriter, r *http.Request) {
@@ -441,7 +842,7 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request, nodeID 
 	node.Farfield = body["farfield"]
 	node.Metrics = mapValue(body["metrics"])
 	nextThreads := normalizeThreads(body["threads"])
-	updateThreadNotificationsLocked(node, node.Threads, nextThreads, previousLastSeenAt)
+	newNotifications := updateThreadNotificationsLocked(node, node.Threads, nextThreads, previousLastSeenAt)
 	node.Threads = nextThreads
 	node.LastError = body["lastError"]
 	s.cleanupCommandsLocked(node)
@@ -455,6 +856,9 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request, nodeID 
 	s.state.mu.Unlock()
 	s.persistState()
 	s.sendEvent(map[string]any{"type": "state", "state": s.dashboardState()})
+	for _, notice := range newNotifications {
+		go s.deliverNotification(s.notificationPayload(nodeID, public, notice))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "node": public, "queuedCommands": queued})
 }
 
@@ -557,8 +961,10 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 			node.Commands[i].CompletedAt = nowISO()
 			node.Commands[i].Result = body
 			cmd := node.Commands[i]
+			var newNotice codexhub.Notification
+			notify := false
 			if cmd.Status == "failed" && stringValue(cmd.Action["threadId"]) != "" {
-				addNodeNotificationLocked(node, codexhub.Notification{
+				newNotice, notify = addNodeNotificationLocked(node, codexhub.Notification{
 					Type:            "commandFailed",
 					ThreadID:        stringValue(cmd.Action["threadId"]),
 					ThreadUpdatedAt: cmd.CompletedAt,
@@ -566,11 +972,15 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 					Preview:         firstNonEmptyString(stringValue(body["error"]), stringValue(mapValue(body["result"])["error"]), "桌面端执行手机指令失败，请检查本机状态。"),
 				})
 			}
+			public := s.publicNodeLocked(node)
 			s.recordAuditLocked("command.completed", "node", map[string]any{"nodeId": nodeID, "commandId": commandID, "status": cmd.Status})
 			s.state.mu.Unlock()
 			s.persistState()
 			s.sendEvent(map[string]any{"type": "state", "state": s.dashboardState()})
 			s.sendEvent(map[string]any{"type": "commandResult", "nodeId": nodeID, "command": cmd})
+			if notify {
+				go s.deliverNotification(s.notificationPayload(nodeID, public, newNotice))
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": cmd})
 			return
 		}
@@ -664,7 +1074,7 @@ func (s *server) dashboardState() map[string]any {
 		}
 	}
 	report := map[string]any{"date": todayStart.Format("2006-01-02"), "timezoneOffsetMinutes": reportOffset, "updatedThreads": totals["updatedToday"], "completedThreads": totals["completedToday"], "failedCommands": totals["failedCommands"], "onlineNodes": totals["online"], "totalNodes": totals["nodes"]}
-	return map[string]any{"ok": true, "version": env("CODEXHUB_VERSION", version), "generatedAt": nowISO(), "startedAt": startedAt, "storage": map[string]any{"driver": env("CODEXHUB_STORAGE", "json"), "sqliteNote": "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite during a future migration window."}, "reports": map[string]any{"today": report}, "totals": totals, "nodes": nodes}
+	return map[string]any{"ok": true, "version": env("CODEXHUB_VERSION", version), "generatedAt": nowISO(), "startedAt": startedAt, "storage": s.storageStatus(), "reports": map[string]any{"today": report}, "totals": totals, "nodes": nodes}
 }
 
 func (s *server) publicNodeLocked(node *codexhub.Node) map[string]any {
@@ -935,7 +1345,7 @@ func (s *server) installProfile(r *http.Request) map[string]any {
 	installKey := s.currentInstallKey()
 	releaseVersion := env("CODEXHUB_VERSION", version)
 	if releaseVersion == "dev" || releaseVersion == "" {
-		releaseVersion = "0.4.4"
+		releaseVersion = "0.4.5"
 	}
 	downloads := map[string]string{
 		"androidApk":         fmt.Sprintf("%s/downloads/codexhub-android-v%s.apk", base, releaseVersion),
@@ -1021,6 +1431,13 @@ func (s *server) serveStatic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) loadState() error {
+	if s.cfg.StorageDriver == "sqlite" {
+		if loaded, err := s.loadSQLiteState(); err == nil && loaded {
+			return nil
+		} else if err != nil {
+			log.Printf("sqlite state load warning: %v", err)
+		}
+	}
 	if s.cfg.DataFile == "" || !exists(s.cfg.DataFile) {
 		return nil
 	}
@@ -1048,6 +1465,10 @@ func (s *server) loadState() error {
 		payload.AuditLogs = payload.AuditLogs[len(payload.AuditLogs)-500:]
 	}
 	s.state.auditLogs = payload.AuditLogs
+	if len(payload.PushSubscriptions) > 200 {
+		payload.PushSubscriptions = payload.PushSubscriptions[len(payload.PushSubscriptions)-200:]
+	}
+	s.state.pushSubscriptions = payload.PushSubscriptions
 	if strings.TrimSpace(payload.InstallKey) != "" {
 		s.state.installKey = strings.TrimSpace(payload.InstallKey)
 	}
@@ -1055,11 +1476,15 @@ func (s *server) loadState() error {
 }
 
 func (s *server) persistState() {
-	if s.cfg.DataFile == "" {
-		return
-	}
 	s.state.mu.RLock()
-	payload := persistedState{SavedAt: nowISO(), InstallKey: s.state.installKey, AuditLogs: append([]codexhub.AuditEntry(nil), s.state.auditLogs...)}
+	payload := persistedState{
+		SavedAt:           nowISO(),
+		SchemaVersion:     2,
+		StorageDriver:     s.cfg.StorageDriver,
+		InstallKey:        s.state.installKey,
+		AuditLogs:         append([]codexhub.AuditEntry(nil), s.state.auditLogs...),
+		PushSubscriptions: append([]codexhub.PushSubscription(nil), s.state.pushSubscriptions...),
+	}
 	for _, node := range s.state.nodes {
 		n := *node
 		commands := []codexhub.Command{}
@@ -1072,12 +1497,162 @@ func (s *server) persistState() {
 		payload.Nodes = append(payload.Nodes, n)
 	}
 	s.state.mu.RUnlock()
-	_ = os.MkdirAll(filepath.Dir(s.cfg.DataFile), 0755)
-	tmp := s.cfg.DataFile + ".tmp"
-	if data, err := json.MarshalIndent(payload, "", "  "); err == nil {
-		_ = os.WriteFile(tmp, data, 0644)
-		_ = os.Rename(tmp, s.cfg.DataFile)
+	if s.cfg.DataFile != "" {
+		_ = os.MkdirAll(filepath.Dir(s.cfg.DataFile), 0755)
+		tmp := s.cfg.DataFile + ".tmp"
+		if data, err := json.MarshalIndent(payload, "", "  "); err == nil {
+			_ = os.WriteFile(tmp, data, 0644)
+			_ = os.Rename(tmp, s.cfg.DataFile)
+		}
 	}
+	if s.cfg.StorageDriver == "sqlite" {
+		if err := s.persistSQLiteState(payload); err != nil {
+			log.Printf("sqlite state persist warning: %v", err)
+		}
+	}
+}
+
+func (s *server) applyPersistedState(payload persistedState) {
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	for _, node := range payload.Nodes {
+		n := node
+		if n.ID == "" {
+			continue
+		}
+		if n.Commands == nil {
+			n.Commands = []codexhub.Command{}
+		}
+		s.state.nodes[n.ID] = &n
+	}
+	if len(payload.AuditLogs) > 500 {
+		payload.AuditLogs = payload.AuditLogs[len(payload.AuditLogs)-500:]
+	}
+	s.state.auditLogs = payload.AuditLogs
+	if len(payload.PushSubscriptions) > 200 {
+		payload.PushSubscriptions = payload.PushSubscriptions[len(payload.PushSubscriptions)-200:]
+	}
+	s.state.pushSubscriptions = payload.PushSubscriptions
+	if strings.TrimSpace(payload.InstallKey) != "" {
+		s.state.installKey = strings.TrimSpace(payload.InstallKey)
+	}
+}
+
+func (s *server) loadSQLiteState() (bool, error) {
+	if err := s.sqliteExec(sqliteSchemaSQL()); err != nil {
+		return false, err
+	}
+	output, err := s.sqliteQuery("SELECT payload FROM state_snapshots ORDER BY id DESC LIMIT 1;\n")
+	if err != nil || strings.TrimSpace(output) == "" {
+		return false, err
+	}
+	var payload persistedState
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &payload); err != nil {
+		return false, err
+	}
+	s.applyPersistedState(payload)
+	return true, nil
+}
+
+func (s *server) persistSQLiteState(payload persistedState) error {
+	if !s.shouldPersistSQLite() {
+		return nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	statements := []string{sqliteSchemaSQL(), "BEGIN;"}
+	statements = append(statements,
+		fmt.Sprintf("INSERT OR REPLACE INTO state_snapshots(id,saved_at,payload) VALUES(1,%s,%s);", sqlString(payload.SavedAt), sqlString(string(data))),
+		"DELETE FROM state_snapshots WHERE id != 1;",
+		fmt.Sprintf("INSERT OR REPLACE INTO meta(key,value,updated_at) VALUES('installKey',%s,%s);", sqlString(payload.InstallKey), sqlString(payload.SavedAt)),
+		fmt.Sprintf("INSERT OR REPLACE INTO meta(key,value,updated_at) VALUES('schemaVersion','2',%s);", sqlString(payload.SavedAt)),
+		"DELETE FROM nodes;",
+		"DELETE FROM notifications;",
+		"DELETE FROM audit_logs;",
+	)
+	for _, node := range payload.Nodes {
+		nodeData, _ := json.Marshal(node)
+		status := "offline"
+		if node.RevokedAt != "" {
+			status = "revoked"
+		} else if node.LastSeenAt != "" {
+			if last, err := time.Parse(time.RFC3339, node.LastSeenAt); err == nil && time.Since(last) <= s.cfg.OfflineAfter {
+				status = "online"
+			}
+		}
+		statements = append(statements, fmt.Sprintf(
+			"INSERT OR REPLACE INTO nodes(id,name,status,last_seen_at,version,payload,updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s);",
+			sqlString(node.ID), sqlString(firstNonEmptyString(node.Name, node.ID)), sqlString(status), sqlString(node.LastSeenAt), sqlString(stringValue(node.Version)), sqlString(string(nodeData)), sqlString(payload.SavedAt),
+		))
+		for _, notice := range node.Notifications {
+			noticeData, _ := json.Marshal(notice)
+			statements = append(statements, fmt.Sprintf(
+				"INSERT OR REPLACE INTO notifications(id,node_id,thread_id,type,read_at,created_at,payload) VALUES(%s,%s,%s,%s,%s,%s,%s);",
+				sqlString(notice.ID), sqlString(node.ID), sqlString(notice.ThreadID), sqlString(notice.Type), sqlString(notice.ReadAt), sqlString(notice.CreatedAt), sqlString(string(noticeData)),
+			))
+		}
+	}
+	for _, entry := range payload.AuditLogs {
+		entryData, _ := json.Marshal(entry)
+		statements = append(statements, fmt.Sprintf(
+			"INSERT OR REPLACE INTO audit_logs(id,at,type,actor,payload) VALUES(%s,%s,%s,%s,%s);",
+			sqlString(entry.ID), sqlString(entry.At), sqlString(entry.Type), sqlString(entry.Actor), sqlString(string(entryData)),
+		))
+	}
+	statements = append(statements, "COMMIT;")
+	return s.sqliteExec(strings.Join(statements, "\n"))
+}
+
+func (s *server) shouldPersistSQLite() bool {
+	if s.cfg.SQLiteMinPersist <= 0 {
+		return true
+	}
+	s.sqliteThrottleMu.Lock()
+	defer s.sqliteThrottleMu.Unlock()
+	now := time.Now()
+	if !s.lastSQLitePersist.IsZero() && now.Sub(s.lastSQLitePersist) < s.cfg.SQLiteMinPersist {
+		return false
+	}
+	s.lastSQLitePersist = now
+	return true
+}
+
+func (s *server) sqliteExec(sql string) error {
+	s.sqliteMu.Lock()
+	defer s.sqliteMu.Unlock()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return fmt.Errorf("sqlite3 command not found")
+	}
+	if err := os.MkdirAll(filepath.Dir(s.cfg.SQLiteFile), 0755); err != nil {
+		return err
+	}
+	cmd := exec.Command("sqlite3", "-batch", "-cmd", ".timeout 5000", s.cfg.SQLiteFile)
+	cmd.Stdin = strings.NewReader(sql)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func (s *server) sqliteQuery(sql string) (string, error) {
+	s.sqliteMu.Lock()
+	defer s.sqliteMu.Unlock()
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return "", fmt.Errorf("sqlite3 command not found")
+	}
+	cmd := exec.Command("sqlite3", "-batch", "-noheader", "-cmd", ".timeout 5000", s.cfg.SQLiteFile)
+	cmd.Stdin = strings.NewReader(sql)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 func (s *server) getOrCreateNodeLocked(nodeID string) *codexhub.Node {
@@ -1129,6 +1704,51 @@ func (s *server) nodeStatusLocked(node *codexhub.Node) string {
 		return "offline"
 	}
 	return "online"
+}
+
+func (s *server) storageStatus() map[string]any {
+	sqliteAvailable := false
+	if _, err := exec.LookPath("sqlite3"); err == nil {
+		sqliteAvailable = true
+	}
+	note := "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite during a future migration window."
+	if s.cfg.StorageDriver == "sqlite" {
+		if sqliteAvailable {
+			note = "SQLite mode is active. JSON snapshots are still kept as a compatible fallback."
+		} else {
+			note = "SQLite mode is configured but sqlite3 was not found; install sqlite3 or switch back to JSON."
+		}
+	}
+	file := s.cfg.DataFile
+	if s.cfg.StorageDriver == "sqlite" {
+		file = s.cfg.SQLiteFile
+	}
+	return map[string]any{
+		"driver":        s.cfg.StorageDriver,
+		"file":          file,
+		"jsonFile":      nullableString(s.cfg.DataFile),
+		"sqliteFile":    s.cfg.SQLiteFile,
+		"sqliteEnabled": s.cfg.StorageDriver == "sqlite" && sqliteAvailable,
+		"sqliteNote":    note,
+	}
+}
+
+func sqliteSchemaSQL() string {
+	return `
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS state_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, name TEXT, status TEXT, last_seen_at TEXT, version TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, node_id TEXT NOT NULL, thread_id TEXT, type TEXT, read_at TEXT, created_at TEXT, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, at TEXT NOT NULL, type TEXT NOT NULL, actor TEXT, payload TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_node_read ON notifications(node_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_at ON audit_logs(at);
+`
+}
+
+func sqlString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func (s *server) isAdminAuthed(r *http.Request) bool {
@@ -1305,7 +1925,8 @@ func normalizeRecentMessages(value any) []codexhub.ThreadMessage {
 	return messages
 }
 
-func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []codexhub.Thread, nextThreads []codexhub.Thread, previousLastSeenAt string) {
+func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []codexhub.Thread, nextThreads []codexhub.Thread, previousLastSeenAt string) []codexhub.Notification {
+	created := []codexhub.Notification{}
 	previousByID := map[string]codexhub.Thread{}
 	for _, t := range previousThreads {
 		previousByID[t.ID] = t
@@ -1317,38 +1938,45 @@ func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []code
 		if !ok {
 			finalAt := anyTimeMillis(t.LatestFinalMessageAt)
 			if !t.IsGenerating && previousLastSeenMs > 0 && finalAt > previousLastSeenMs {
-				addNodeNotificationLocked(node, codexhub.Notification{
+				if notice, ok := addNodeNotificationLocked(node, codexhub.Notification{
 					Type:            "completed",
 					ThreadID:        t.ID,
 					ThreadUpdatedAt: firstNonZero(t.LatestFinalMessageAt, threadUpdatedAt),
 					Title:           notificationTitle(t),
 					Preview:         firstNonEmptyString(t.LatestFinalMessage, t.LatestMessage, t.Preview, "任务已结束，等待查看。"),
-				})
+				}); ok {
+					created = append(created, notice)
+				}
 			}
 			continue
 		}
 		switch {
 		case previous.IsGenerating && !t.IsGenerating:
-			addNodeNotificationLocked(node, codexhub.Notification{
+			if notice, ok := addNodeNotificationLocked(node, codexhub.Notification{
 				Type:            "completed",
 				ThreadID:        t.ID,
 				ThreadUpdatedAt: threadUpdatedAt,
 				Title:           notificationTitle(t),
 				Preview:         firstNonEmptyString(t.LatestFinalMessage, t.LatestMessage, t.Preview, "任务已结束，等待查看。"),
-			})
+			}); ok {
+				created = append(created, notice)
+			}
 		case !t.IsGenerating && anyTimeMillis(t.LatestFinalMessageAt) > anyTimeMillis(previous.LatestFinalMessageAt):
-			addNodeNotificationLocked(node, codexhub.Notification{
+			if notice, ok := addNodeNotificationLocked(node, codexhub.Notification{
 				Type:            "updated",
 				ThreadID:        t.ID,
 				ThreadUpdatedAt: t.LatestFinalMessageAt,
 				Title:           notificationTitle(t),
 				Preview:         firstNonEmptyString(t.LatestFinalMessage, "任务有新内容。"),
-			})
+			}); ok {
+				created = append(created, notice)
+			}
 		}
 	}
+	return created
 }
 
-func addNodeNotificationLocked(node *codexhub.Node, notice codexhub.Notification) {
+func addNodeNotificationLocked(node *codexhub.Node, notice codexhub.Notification) (codexhub.Notification, bool) {
 	notice.DedupeKey = notice.Type + ":" + notice.ThreadID + ":" + stringValue(notice.ThreadUpdatedAt)
 	for i := range node.Notifications {
 		existing := &node.Notifications[i]
@@ -1359,12 +1987,12 @@ func addNodeNotificationLocked(node *codexhub.Node, notice codexhub.Notification
 			existing.Preview = notice.Preview
 			existing.CreatedAt = nowISO()
 			existing.DedupeKey = notice.DedupeKey
-			return
+			return *existing, true
 		}
 	}
 	for _, existing := range node.Notifications {
 		if existing.DedupeKey == notice.DedupeKey {
-			return
+			return codexhub.Notification{}, false
 		}
 	}
 	notice.ID = uuid()
@@ -1373,6 +2001,7 @@ func addNodeNotificationLocked(node *codexhub.Node, notice codexhub.Notification
 	if len(node.Notifications) > 100 {
 		node.Notifications = node.Notifications[len(node.Notifications)-100:]
 	}
+	return notice, true
 }
 
 func notificationTitle(thread codexhub.Thread) string {

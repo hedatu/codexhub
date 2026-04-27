@@ -8,17 +8,30 @@ HOST="${CODEXHUB_HOST:-127.0.0.1}"
 PUBLIC_URL="${CODEXHUB_PUBLIC_URL:-}"
 ADMIN_TOKEN="${CODEXHUB_ADMIN_TOKEN:-$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
 INSTALL_KEY="${CODEXHUB_INSTALL_KEY:-$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
+STORAGE="${CODEXHUB_STORAGE:-sqlite}"
+DATA_DIR="${CODEXHUB_DATA_DIR:-$INSTALL_DIR/data}"
+BACKUP_DIR="${CODEXHUB_BACKUP_DIR:-$INSTALL_DIR/backups}"
+BACKUP_RETENTION_DAYS="${CODEXHUB_BACKUP_RETENTION_DAYS:-30}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this script as root so it can create a systemd service." >&2
   exit 1
 fi
 
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y sqlite3
+  else
+    echo "sqlite3 was not found. Install sqlite3 or set CODEXHUB_STORAGE=json before starting CodexHub." >&2
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$BACKUP_DIR"
 rsync -a --delete \
   --exclude node_modules \
   --exclude codexhub-state.json \
@@ -31,6 +44,12 @@ CODEXHUB_PUBLIC_URL=$PUBLIC_URL
 CODEXHUB_ADMIN_TOKEN=$ADMIN_TOKEN
 CODEXHUB_INSTALL_KEY=$INSTALL_KEY
 CODEXHUB_DATA_FILE=$INSTALL_DIR/codexhub-state.json
+CODEXHUB_STORAGE=$STORAGE
+CODEXHUB_SQLITE_FILE=$DATA_DIR/codexhub.db
+CODEXHUB_SQLITE_MIN_PERSIST_MS=${CODEXHUB_SQLITE_MIN_PERSIST_MS:-15000}
+CODEXHUB_BACKUP_DIR=$BACKUP_DIR
+CODEXHUB_BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
+CODEXHUB_REPORT_TZ_OFFSET_MINUTES=${CODEXHUB_REPORT_TZ_OFFSET_MINUTES:-480}
 EOF_ENV
 
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
@@ -83,8 +102,36 @@ EOF_SERVICE
 systemctl daemon-reload
 systemctl enable --now codexhub.service
 
+cat > /etc/systemd/system/codexhub-backup.service <<EOF_BACKUP_SERVICE
+[Unit]
+Description=CodexHub server backup
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+EnvironmentFile=$INSTALL_DIR/codexhub.env
+ExecStart=$INSTALL_DIR/scripts/backup-server.sh
+EOF_BACKUP_SERVICE
+
+cat > /etc/systemd/system/codexhub-backup.timer <<EOF_BACKUP_TIMER
+[Unit]
+Description=Run CodexHub backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF_BACKUP_TIMER
+
+systemctl daemon-reload
+systemctl enable --now codexhub-backup.timer
+
 echo "CodexHub server installed."
 echo "Local URL: http://127.0.0.1:$PORT"
 echo "ADMIN_TOKEN=$ADMIN_TOKEN"
 echo "INSTALL_KEY=$INSTALL_KEY"
+echo "SQLite: $DATA_DIR/codexhub.db"
+echo "Backups: $BACKUP_DIR"
 echo "Put Nginx/Caddy HTTPS in front of http://127.0.0.1:$PORT"

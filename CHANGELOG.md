@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.5
+
+- Added SQLite persistence for the cloud server, enabled by `CODEXHUB_STORAGE=sqlite`.
+- Added server backup script plus `codexhub-backup.service` and `codexhub-backup.timer`.
+- Added Firebase Cloud Messaging HTTP v1 integration with service-account OAuth.
+- Added Firebase Web Messaging auto-registration in the mobile/web console.
+- Updated Go and Node server runtimes so packaged Linux server installs use the same SQLite and FCM behavior.
+- Documented server data paths, backup retention, and FCM configuration.
+
 ## v0.4.4
 
 - Added configurable webhook/FCM push delivery hooks and push registration/test APIs.

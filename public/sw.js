@@ -1,4 +1,4 @@
-const CACHE_NAME = "codexhub-v20";
+const CACHE_NAME = "codexhub-v21";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(["/", "/tv.html", "/styles.css", "/app.js", "/tv.js", "/manifest.webmanifest"])));

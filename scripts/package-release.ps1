@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.4"
+  [string]$Version = "0.4.5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -102,6 +102,7 @@ Copy-Items @(
   "src\server",
   "public",
   "scripts\install-server.sh",
+  "scripts\backup-server.sh",
   "android",
   "deploy",
   "docs"

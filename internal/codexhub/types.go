@@ -108,3 +108,13 @@ type AuditEntry struct {
 	Actor   string         `json:"actor"`
 	Details map[string]any `json:"details"`
 }
+
+type PushSubscription struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Token     string `json:"token"`
+	Label     any    `json:"label,omitempty"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+	RevokedAt string `json:"revokedAt,omitempty"`
+}

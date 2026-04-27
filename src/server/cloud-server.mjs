@@ -2,7 +2,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomBytes, randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createSign, randomBytes, randomUUID } from "node:crypto";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -18,13 +19,24 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
-const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.4";
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.5";
 const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
+const SQLITE_FILE = process.env.CODEXHUB_SQLITE_FILE
+  ? path.resolve(process.env.CODEXHUB_SQLITE_FILE)
+  : path.join(ROOT, "data", "codexhub.db");
 const PUSH_WEBHOOK_URL = process.env.CODEXHUB_PUSH_WEBHOOK_URL ?? "";
-const FCM_SERVER_KEY = process.env.CODEXHUB_FCM_SERVER_KEY ?? "";
-const FCM_ENDPOINT = process.env.CODEXHUB_FCM_ENDPOINT ?? "https://fcm.googleapis.com/fcm/send";
+const FCM_SERVICE_ACCOUNT_FILE = process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_FILE ? path.resolve(process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_FILE) : "";
+const FCM_SERVICE_ACCOUNT_JSON = process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_JSON ?? "";
+const FCM_PROJECT_ID = process.env.CODEXHUB_FCM_PROJECT_ID ?? "";
+const FIREBASE_WEB_CONFIG = process.env.CODEXHUB_FIREBASE_WEB_CONFIG ?? "";
+const FIREBASE_VAPID_KEY = process.env.CODEXHUB_FIREBASE_VAPID_KEY ?? "";
 const AGENT_UPDATE_POLICY = process.env.CODEXHUB_AGENT_UPDATE_POLICY ?? "prompt";
 const REPORT_TZ_OFFSET_MINUTES = Number(process.env.CODEXHUB_REPORT_TZ_OFFSET_MINUTES ?? 480);
+const SQLITE_MIN_PERSIST_MS = Number(process.env.CODEXHUB_SQLITE_MIN_PERSIST_MS ?? 15_000);
+let sqliteAvailable = null;
+let lastSqlitePersistAt = 0;
+let fcmAccessToken = null;
+let fcmAccessTokenExpiresAt = 0;
 
 const state = {
   startedAt: new Date().toISOString(),
@@ -60,10 +72,60 @@ function safeJsonParse(text) {
   }
 }
 
-function loadState() {
-  if (!DATA_FILE || !fs.existsSync(DATA_FILE)) return;
-  const parsed = safeJsonParse(fs.readFileSync(DATA_FILE, "utf8"));
-  if (!parsed || !Array.isArray(parsed.nodes)) return;
+function sqlString(value) {
+  if (value == null) return "NULL";
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function sqliteCanRun() {
+  if (sqliteAvailable != null) return sqliteAvailable;
+  const result = spawnSync("sqlite3", ["-version"], { encoding: "utf8" });
+  sqliteAvailable = result.status === 0;
+  return sqliteAvailable;
+}
+
+function sqliteExec(sql) {
+  if (STORAGE_DRIVER !== "sqlite") return { ok: false, skipped: true };
+  if (!sqliteCanRun()) return { ok: false, error: "sqlite3 command not found" };
+  fs.mkdirSync(path.dirname(SQLITE_FILE), { recursive: true });
+  const result = spawnSync("sqlite3", ["-batch", SQLITE_FILE], {
+    input: sql,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    return { ok: false, error: result.stderr || result.stdout || `sqlite3 exited ${result.status}` };
+  }
+  return { ok: true, stdout: result.stdout };
+}
+
+function sqliteQuery(sql) {
+  if (STORAGE_DRIVER !== "sqlite" || !sqliteCanRun() || !fs.existsSync(SQLITE_FILE)) return "";
+  const result = spawnSync("sqlite3", ["-batch", "-noheader", SQLITE_FILE], {
+    input: sql,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  return result.status === 0 ? result.stdout : "";
+}
+
+function sqliteSchemaSql() {
+  return `
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS state_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, saved_at TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, name TEXT, status TEXT, last_seen_at TEXT, version TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, node_id TEXT NOT NULL, thread_id TEXT, type TEXT, read_at TEXT, created_at TEXT, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, at TEXT NOT NULL, type TEXT NOT NULL, actor TEXT, payload TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_node_read ON notifications(node_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_at ON audit_logs(at);
+`;
+}
+
+function applyLoadedState(parsed) {
+  if (!parsed || !Array.isArray(parsed.nodes)) return false;
+  state.nodes.clear();
   for (const node of parsed.nodes) {
     if (node && typeof node.id === "string") {
       state.nodes.set(node.id, {
@@ -81,10 +143,25 @@ function loadState() {
   if (typeof parsed.installKey === "string" && parsed.installKey.trim()) {
     state.installKey = parsed.installKey.trim();
   }
+  return true;
+}
+
+function loadSqliteState() {
+  if (STORAGE_DRIVER !== "sqlite") return false;
+  sqliteExec(sqliteSchemaSql());
+  const output = sqliteQuery("SELECT payload FROM state_snapshots ORDER BY id DESC LIMIT 1;\n");
+  const parsed = safeJsonParse(output.trim());
+  return applyLoadedState(parsed);
+}
+
+function loadState() {
+  if (loadSqliteState()) return;
+  if (!DATA_FILE || !fs.existsSync(DATA_FILE)) return;
+  const parsed = safeJsonParse(fs.readFileSync(DATA_FILE, "utf8"));
+  applyLoadedState(parsed);
 }
 
 function persistState() {
-  if (!DATA_FILE) return;
   const payload = {
     savedAt: nowIso(),
     schemaVersion: 2,
@@ -97,8 +174,42 @@ function persistState() {
       commands: node.commands.filter((command) => command.status !== "done"),
     })),
   };
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2));
+  if (DATA_FILE) {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2));
+  }
+  persistSqliteState(payload);
+}
+
+function persistSqliteState(payload) {
+  if (STORAGE_DRIVER !== "sqlite") return;
+  const now = Date.now();
+  if (SQLITE_MIN_PERSIST_MS > 0 && lastSqlitePersistAt && now - lastSqlitePersistAt < SQLITE_MIN_PERSIST_MS) return;
+  lastSqlitePersistAt = now;
+  const savedAt = payload.savedAt;
+  const statements = [sqliteSchemaSql(), "BEGIN;"];
+  statements.push(`INSERT OR REPLACE INTO state_snapshots(id,saved_at,payload) VALUES(1,${sqlString(savedAt)},${sqlString(JSON.stringify(payload))});`);
+  statements.push("DELETE FROM state_snapshots WHERE id != 1;");
+  statements.push(`INSERT OR REPLACE INTO meta(key,value,updated_at) VALUES('installKey',${sqlString(payload.installKey)},${sqlString(savedAt)});`);
+  statements.push(`INSERT OR REPLACE INTO meta(key,value,updated_at) VALUES('schemaVersion','2',${sqlString(savedAt)});`);
+  statements.push("DELETE FROM nodes;");
+  statements.push("DELETE FROM notifications;");
+  statements.push("DELETE FROM audit_logs;");
+  for (const node of payload.nodes) {
+    const publicStatus = getNodeStatus(node);
+    statements.push(`INSERT OR REPLACE INTO nodes(id,name,status,last_seen_at,version,payload,updated_at) VALUES(${sqlString(node.id)},${sqlString(node.name ?? node.id)},${sqlString(publicStatus)},${sqlString(node.lastSeenAt ?? "")},${sqlString(node.version ?? "")},${sqlString(JSON.stringify(node))},${sqlString(savedAt)});`);
+    for (const notice of node.notifications ?? []) {
+      statements.push(`INSERT OR REPLACE INTO notifications(id,node_id,thread_id,type,read_at,created_at,payload) VALUES(${sqlString(notice.id)},${sqlString(node.id)},${sqlString(notice.threadId ?? "")},${sqlString(notice.type ?? "")},${sqlString(notice.readAt ?? "")},${sqlString(notice.createdAt ?? "")},${sqlString(JSON.stringify(notice))});`);
+    }
+  }
+  for (const entry of payload.auditLogs) {
+    statements.push(`INSERT OR REPLACE INTO audit_logs(id,at,type,actor,payload) VALUES(${sqlString(entry.id)},${sqlString(entry.at)},${sqlString(entry.type)},${sqlString(entry.actor ?? "")},${sqlString(JSON.stringify(entry))});`);
+  }
+  statements.push("COMMIT;");
+  const result = sqliteExec(statements.join("\n"));
+  if (!result.ok && !result.skipped) {
+    console.error(`SQLite persist failed: ${result.error}`);
+  }
 }
 
 function getPresentedToken(req, url) {
@@ -162,10 +273,14 @@ function recordAudit(type, actor, details = {}) {
 function storageStatus() {
   return {
     driver: STORAGE_DRIVER,
-    file: DATA_FILE,
-    sqliteEnabled: STORAGE_DRIVER === "sqlite",
+    file: STORAGE_DRIVER === "sqlite" ? SQLITE_FILE : DATA_FILE,
+    jsonFile: DATA_FILE,
+    sqliteFile: SQLITE_FILE,
+    sqliteEnabled: STORAGE_DRIVER === "sqlite" && sqliteCanRun(),
     sqliteNote: STORAGE_DRIVER === "sqlite"
-      ? "SQLite mode is configured. JSON snapshots are still kept as a compatible fallback."
+      ? sqliteCanRun()
+        ? "SQLite mode is active. JSON snapshots are still kept as a compatible fallback."
+        : "SQLite mode is configured but sqlite3 was not found; install sqlite3 or switch back to JSON."
       : "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite in a future migration window to enable SQLite-backed history.",
   };
 }
@@ -281,6 +396,98 @@ async function postJsonExternal(url, payload, headers = {}) {
   }
 }
 
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function loadFcmServiceAccount() {
+  const raw = FCM_SERVICE_ACCOUNT_JSON || (FCM_SERVICE_ACCOUNT_FILE && fs.existsSync(FCM_SERVICE_ACCOUNT_FILE)
+    ? fs.readFileSync(FCM_SERVICE_ACCOUNT_FILE, "utf8")
+    : "");
+  const parsed = raw ? safeJsonParse(raw) : null;
+  if (!parsed?.client_email || !parsed?.private_key) return null;
+  return parsed;
+}
+
+function fcmProjectId(account = loadFcmServiceAccount()) {
+  return FCM_PROJECT_ID || account?.project_id || "";
+}
+
+async function getFcmAccessToken() {
+  if (fcmAccessToken && Date.now() < fcmAccessTokenExpiresAt - 60_000) return fcmAccessToken;
+  const account = loadFcmServiceAccount();
+  if (!account) throw new Error("FCM service account is not configured");
+  const now = Math.floor(Date.now() / 1000);
+  const tokenUri = account.token_uri || "https://oauth2.googleapis.com/token";
+  const unsigned = [
+    base64UrlJson({ alg: "RS256", typ: "JWT" }),
+    base64UrlJson({
+      iss: account.client_email,
+      scope: "https://www.googleapis.com/auth/firebase.messaging",
+      aud: tokenUri,
+      iat: now,
+      exp: now + 3600,
+    }),
+  ].join(".");
+  const signature = createSign("RSA-SHA256").update(unsigned).sign(account.private_key, "base64url");
+  const assertion = `${unsigned}.${signature}`;
+  const response = await fetch(tokenUri, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) {
+    throw new Error(payload.error_description || payload.error || `FCM OAuth failed: ${response.status}`);
+  }
+  fcmAccessToken = payload.access_token;
+  fcmAccessTokenExpiresAt = Date.now() + Number(payload.expires_in ?? 3600) * 1000;
+  return fcmAccessToken;
+}
+
+function fcmConfigured() {
+  const account = loadFcmServiceAccount();
+  return Boolean(account && fcmProjectId(account));
+}
+
+async function sendFcmMessage(token, notification) {
+  const account = loadFcmServiceAccount();
+  const projectId = fcmProjectId(account);
+  if (!projectId) throw new Error("FCM project id is missing");
+  const accessToken = await getFcmAccessToken();
+  const publicUrl = PUBLIC_URL || "";
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      message: {
+        token,
+        notification: {
+          title: notification.title || "CodexHub",
+          body: notification.preview || "有新的待处理事项",
+        },
+        data: {
+          nodeId: String(notification.nodeId || ""),
+          threadId: String(notification.threadId || ""),
+          type: String(notification.type || "notification"),
+          url: "/",
+        },
+        webpush: publicUrl ? {
+          fcm_options: { link: publicUrl },
+        } : undefined,
+      },
+    }),
+  });
+  const text = await response.text().catch(() => "");
+  return { ok: response.ok, status: response.status, text };
+}
+
 async function deliverNotification(notification) {
   const payload = {
     version: RELEASE_VERSION,
@@ -294,20 +501,10 @@ async function deliverNotification(notification) {
   const fcmTokens = state.pushSubscriptions
     .filter((item) => item.type === "fcm" && item.token && !item.revokedAt)
     .map((item) => item.token);
-  if (FCM_SERVER_KEY && fcmTokens.length > 0) {
-    deliveries.push(postJsonExternal(FCM_ENDPOINT, {
-      registration_ids: fcmTokens.slice(0, 500),
-      notification: {
-        title: notification.title || "CodexHub",
-        body: notification.preview || "有新的待处理事项",
-      },
-      data: {
-        nodeId: notification.nodeId || "",
-        threadId: notification.threadId || "",
-        type: notification.type || "notification",
-        url: "/",
-      },
-    }, { authorization: `key=${FCM_SERVER_KEY}` }).then((result) => ({ provider: "fcm", ...result })));
+  if (fcmConfigured() && fcmTokens.length > 0) {
+    for (const token of fcmTokens.slice(0, 500)) {
+      deliveries.push(sendFcmMessage(token, notification).then((result) => ({ provider: "fcm", ...result })));
+    }
   }
   if (deliveries.length === 0) return;
   const results = await Promise.allSettled(deliveries);
@@ -788,7 +985,8 @@ const server = http.createServer(async (req, res) => {
         storage: storageStatus(),
         push: {
           webhookConfigured: Boolean(PUSH_WEBHOOK_URL),
-          fcmConfigured: Boolean(FCM_SERVER_KEY),
+          fcmConfigured: fcmConfigured(),
+          firebaseWebConfigured: Boolean(FIREBASE_WEB_CONFIG && FIREBASE_VAPID_KEY),
           subscriptions: state.pushSubscriptions.filter((item) => !item.revokedAt).length,
         },
         startedAt: state.startedAt,
@@ -884,6 +1082,20 @@ const server = http.createServer(async (req, res) => {
         writeJson(res, 200, {
           ok: true,
           auditLogs: state.auditLogs.slice(-limit).reverse(),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/push/config") {
+        if (!isReadAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        writeJson(res, 200, {
+          ok: true,
+          fcmConfigured: fcmConfigured(),
+          firebaseWebConfig: FIREBASE_WEB_CONFIG ? safeJsonParse(FIREBASE_WEB_CONFIG) : null,
+          vapidKey: FIREBASE_VAPID_KEY || null,
         });
         return;
       }

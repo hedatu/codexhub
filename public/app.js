@@ -996,6 +996,36 @@ async function testPush() {
   showToast("测试通知已提交");
 }
 
+async function autoRegisterFirebaseMessaging() {
+  try {
+    if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
+    const config = await apiFetch("/api/push/config");
+    if (!config.firebaseWebConfig || !config.vapidKey) return;
+    if (Notification.permission !== "granted") {
+      const granted = await ensureBrowserNotifications();
+      if (!granted) return;
+    }
+    const [{ initializeApp }, { getMessaging, getToken }] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js"),
+    ]);
+    const app = initializeApp(config.firebaseWebConfig);
+    const registration = await navigator.serviceWorker.ready;
+    const token = await getToken(getMessaging(app), {
+      vapidKey: config.vapidKey,
+      serviceWorkerRegistration: registration,
+    });
+    if (token) {
+      await apiFetch("/api/push/register", {
+        method: "POST",
+        body: JSON.stringify({ type: "fcm", token, label: `web:${navigator.userAgent.slice(0, 70)}` }),
+      });
+    }
+  } catch {
+    // Push setup is optional. Browser notifications and inbox polling still work.
+  }
+}
+
 async function revokeNode(nodeId) {
   await apiFetch(`/api/nodes/${encodeURIComponent(nodeId)}/revoke`, {
     method: "POST",
@@ -1015,6 +1045,7 @@ dom.saveConfigBtn.addEventListener("click", async () => {
   state.eventSource?.close();
   state.eventSource = null;
   await loadState();
+  autoRegisterFirebaseMessaging();
 });
 
 dom.settingsBtn.addEventListener("click", () => {
@@ -1165,7 +1196,9 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js").then(() => {
+    if (isConfigured()) autoRegisterFirebaseMessaging();
+  }).catch(() => {});
 }
 
 await loadState();

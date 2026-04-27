@@ -37,7 +37,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
 Windows Companion 桌面托盘：
 
 ```powershell
-.\codexhub-companion-installer-windows-x64-v0.4.4.exe
+.\codexhub-companion-installer-windows-x64-v0.4.5.exe
 ```
 
 这个安装器会安装 Companion、写入开机启动、创建开始菜单快捷方式，并在 Windows “应用和功能”里提供卸载入口。正式消除 SmartScreen 提示需要真实代码签名证书。
@@ -45,7 +45,7 @@ Windows Companion 桌面托盘：
 安卓 APK：
 
 ```text
-codexhub-android-v0.4.4.apk
+codexhub-android-v0.4.5.apk
 ```
 
 这个 APK 已经签名，可以在 Android 14 上直接安装。服务器也已经配置 `.well-known/assetlinks.json`，用于 TWA 全屏验证。
@@ -53,6 +53,17 @@ codexhub-android-v0.4.4.apk
 手机端：
 
 打开 `https://你的服务器域名`，用 `ADMIN_TOKEN` 登录。
+
+## 服务器数据位置
+
+v0.4.5 起，服务器推荐使用 SQLite：
+
+- SQLite：`/opt/codexhub/data/codexhub.db`
+- JSON 兼容快照：`/opt/codexhub/codexhub-state.json`
+- 自动备份：`/opt/codexhub/backups`
+- 备份定时器：`codexhub-backup.timer`
+
+如果要开启 FCM 真推送，把 Firebase 服务账号 JSON 放到 `/opt/codexhub/secrets/firebase-service-account.json`，再在 `/opt/codexhub/codexhub.env` 配置 `CODEXHUB_FCM_SERVICE_ACCOUNT_FILE`、`CODEXHUB_FIREBASE_WEB_CONFIG` 和 `CODEXHUB_FIREBASE_VAPID_KEY`。
 
 ## 致谢
 

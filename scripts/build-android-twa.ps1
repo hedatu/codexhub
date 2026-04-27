@@ -1,8 +1,8 @@
 param(
   [string]$Manifest = "$PSScriptRoot\..\android\twa-manifest.json",
   [string]$OutputDir = "$PSScriptRoot\..\dist\android",
-  [string]$Version = "0.4.4",
-  [string]$ApkOutput = "$PSScriptRoot\..\dist\codexhub-android-v0.4.4.apk",
+  [string]$Version = "0.4.5",
+  [string]$ApkOutput = "$PSScriptRoot\..\dist\codexhub-android-v0.4.5.apk",
   [string]$KeyPassword = $env:CODEXHUB_ANDROID_KEY_PASSWORD,
   [switch]$SkipInstall
 )
