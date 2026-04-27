@@ -10,6 +10,7 @@ const PORT = Number(process.env.CODEXHUB_PORT ?? process.env.PORT ?? 8787);
 const HOST = process.env.CODEXHUB_HOST ?? "0.0.0.0";
 const PUBLIC_URL = process.env.CODEXHUB_PUBLIC_URL ? stripSlash(process.env.CODEXHUB_PUBLIC_URL) : "";
 const ADMIN_TOKEN = process.env.CODEXHUB_ADMIN_TOKEN ?? process.env.CODEXHUB_TOKEN ?? "dev-token";
+const READONLY_TOKEN = process.env.CODEXHUB_READONLY_TOKEN ?? "";
 const DEFAULT_INSTALL_KEY = process.env.CODEXHUB_INSTALL_KEY ?? process.env.CODEXHUB_TOKEN ?? ADMIN_TOKEN;
 const DATA_FILE = process.env.CODEXHUB_DATA_FILE
   ? path.resolve(process.env.CODEXHUB_DATA_FILE)
@@ -17,6 +18,7 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.3";
 
 const state = {
   startedAt: new Date().toISOString(),
@@ -85,6 +87,11 @@ function getPresentedToken(req, url) {
 
 function isAdminAuthed(req, url) {
   return getPresentedToken(req, url) === ADMIN_TOKEN;
+}
+
+function isReadAuthed(req, url) {
+  const token = getPresentedToken(req, url);
+  return token === ADMIN_TOKEN || (READONLY_TOKEN && token === READONLY_TOKEN);
 }
 
 function isInstallAuthed(req, url, body = null) {
@@ -162,22 +169,30 @@ function getPublicBaseUrl(req) {
 
 function buildInstallProfile(req) {
   const publicBaseUrl = getPublicBaseUrl(req);
+  const downloads = {
+    androidApk: `${publicBaseUrl}/downloads/codexhub-android-v${RELEASE_VERSION}.apk`,
+    windowsAgent: `${publicBaseUrl}/downloads/codexhub-windows-agent-v${RELEASE_VERSION}.zip`,
+    linuxAgent: `${publicBaseUrl}/downloads/codexhub-linux-agent-v${RELEASE_VERSION}.zip`,
+    macosAgent: `${publicBaseUrl}/downloads/codexhub-macos-agent-v${RELEASE_VERSION}.zip`,
+    server: `${publicBaseUrl}/downloads/codexhub-server-v${RELEASE_VERSION}.zip`,
+    companionInstaller: `${publicBaseUrl}/downloads/codexhub-companion-installer-windows-x64-v${RELEASE_VERSION}.exe`,
+  };
   const windowsCommand = [
-    "powershell -ExecutionPolicy Bypass -File .\\scripts\\install-desktop-agent.ps1",
+    `$u="${downloads.windowsAgent}"; $z="$env:TEMP\\codexhub-windows-agent-v${RELEASE_VERSION}.zip"; $d="$env:TEMP\\codexhub-agent-v${RELEASE_VERSION}"; Invoke-WebRequest $u -OutFile $z; Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive $z -DestinationPath $d -Force; Set-Location $d; powershell -ExecutionPolicy Bypass -File .\\scripts\\install-desktop-agent.ps1`,
     `  -Server "${publicBaseUrl}"`,
     `  -InstallKey "${state.installKey}"`,
     '  -NodeId "TMT1"',
     '  -NodeName "TMT1"',
   ].join(" `\n");
   const linuxCommand = [
-    "bash ./scripts/install-linux-agent.sh",
+    `tmp=$(mktemp -d) && curl -fsSL "${downloads.linuxAgent}" -o "$tmp/codexhub-linux-agent.zip" && unzip -q "$tmp/codexhub-linux-agent.zip" -d "$tmp/codexhub-linux-agent" && cd "$tmp/codexhub-linux-agent" && bash ./scripts/install-linux-agent.sh`,
     `  --server "${publicBaseUrl}"`,
     `  --install-key "${state.installKey}"`,
     '  --node-id "$(hostname)"',
     '  --node-name "$(hostname)"',
   ].join(" \\\n");
   const macosCommand = [
-    "bash ./scripts/install-macos-agent.sh",
+    `tmp=$(mktemp -d) && curl -fsSL "${downloads.macosAgent}" -o "$tmp/codexhub-macos-agent.zip" && unzip -q "$tmp/codexhub-macos-agent.zip" -d "$tmp/codexhub-macos-agent" && cd "$tmp/codexhub-macos-agent" && bash ./scripts/install-macos-agent.sh`,
     `  --server "${publicBaseUrl}"`,
     `  --install-key "${state.installKey}"`,
     '  --node-id "$(scutil --get ComputerName)"',
@@ -186,9 +201,12 @@ function buildInstallProfile(req) {
 
   return {
     ok: true,
+    version: RELEASE_VERSION,
     serverUrl: publicBaseUrl,
     adminToken: ADMIN_TOKEN,
+    readonlyToken: READONLY_TOKEN || null,
     installKey: state.installKey,
+    downloads,
     desktop: {
       powershell: windowsCommand,
       windows: windowsCommand,
@@ -342,7 +360,7 @@ function normalizeThread(thread) {
 
 function normalizeRecentMessages(messages) {
   if (!Array.isArray(messages)) return [];
-  return messages.slice(-6).map((message) => ({
+  return messages.slice(-20).map((message) => ({
     text: String(message?.text ?? "").slice(0, 1800),
     at: message?.at ?? null,
     phase: message?.phase ?? null,
@@ -503,6 +521,8 @@ function dashboardState() {
       waitingReply: nodes.reduce((sum, node) => sum + node.metrics.waitingReply, 0),
       waitingApproval: nodes.reduce((sum, node) => sum + node.metrics.waitingApproval, 0),
       attention: nodes.reduce((sum, node) => sum + node.metrics.attention, 0),
+      unread: nodes.reduce((sum, node) => sum + (node.syncHealth?.unreadNotifications ?? 0), 0),
+      failedCommands: nodes.reduce((sum, node) => sum + (node.syncHealth?.commandCounts?.failed ?? 0), 0),
     },
     nodes,
   };
@@ -598,6 +618,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/health") {
       writeJson(res, 200, {
         ok: true,
+        version: RELEASE_VERSION,
         startedAt: state.startedAt,
         nodes: state.nodes.size,
         authRequired: true,
@@ -606,7 +627,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/events") {
-      if (!isAdminAuthed(req, url)) {
+      if (!isReadAuthed(req, url)) {
         writeJson(res, 401, { ok: false, error: "Unauthorized" });
         return;
       }
@@ -655,7 +676,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "GET" && url.pathname === "/api/state") {
-        if (!isAdminAuthed(req, url)) {
+        if (!isReadAuthed(req, url)) {
           writeJson(res, 401, { ok: false, error: "Unauthorized" });
           return;
         }
@@ -683,7 +704,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "GET" && url.pathname === "/api/audit") {
-        if (!isAdminAuthed(req, url)) {
+        if (!isReadAuthed(req, url)) {
           writeJson(res, 401, { ok: false, error: "Unauthorized" });
           return;
         }
@@ -701,7 +722,7 @@ const server = http.createServer(async (req, res) => {
         const node = getOrCreateNode(nodeId);
 
         if (req.method === "GET" && parts.length === 3) {
-          if (!isAdminAuthed(req, url)) {
+          if (!isReadAuthed(req, url)) {
             writeJson(res, 401, { ok: false, error: "Unauthorized" });
             return;
           }

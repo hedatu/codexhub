@@ -14,6 +14,8 @@ const dom = {
   approval: document.querySelector("#tvApproval"),
   today: document.querySelector("#tvToday"),
   threads: document.querySelector("#tvThreads"),
+  completed: document.querySelector("#tvCompleted"),
+  failed: document.querySelector("#tvFailed"),
   nodeHint: document.querySelector("#tvNodeHint"),
   nodes: document.querySelector("#tvNodes"),
   queue: document.querySelector("#tvQueue"),
@@ -90,7 +92,8 @@ function nodeStatus(node) {
 
 function isToday(epochSeconds) {
   if (!epochSeconds) return false;
-  const date = new Date(epochSeconds * 1000);
+  const value = typeof epochSeconds === "number" && epochSeconds < 10_000_000_000 ? epochSeconds * 1000 : epochSeconds;
+  const date = new Date(value);
   const now = new Date();
   return date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
@@ -114,9 +117,11 @@ function render() {
   const totals = state.dashboard.totals;
   const allThreads = nodes.flatMap((node) => (node.threads ?? []).map((thread) => ({ node, thread })));
   const todayCount = allThreads.filter(({ thread }) => isToday(thread.updatedAt ?? thread.createdAt)).length;
+  const completedToday = allThreads.filter(({ thread }) => !thread.isGenerating && isToday(thread.latestFinalMessageAt ?? thread.updatedAt)).length;
+  const failedCommands = nodes.reduce((sum, node) => sum + Number(node.syncHealth?.commandCounts?.failed ?? 0), 0);
   const queue = allThreads
-    .filter(({ thread }) => thread.isGenerating || thread.waitingOnApproval || thread.waitingOnUserInput)
-    .sort((a, b) => Number(b.thread.updatedAt ?? 0) - Number(a.thread.updatedAt ?? 0))
+    .filter(({ thread }) => thread.isGenerating || thread.waitingOnApproval || thread.waitingOnUserInput || thread.latestFinalMessageAt)
+    .sort((a, b) => new Date(b.thread.latestFinalMessageAt ?? b.thread.latestMessageAt ?? b.thread.updatedAt ?? 0) - new Date(a.thread.latestFinalMessageAt ?? a.thread.latestMessageAt ?? a.thread.updatedAt ?? 0))
     .slice(0, 18);
 
   dom.online.textContent = `${totals.online}/${totals.nodes}`;
@@ -125,6 +130,8 @@ function render() {
   dom.approval.textContent = String(totals.waitingApproval);
   dom.today.textContent = String(todayCount);
   dom.threads.textContent = String(allThreads.length);
+  dom.completed.textContent = String(completedToday);
+  dom.failed.textContent = String(failedCommands);
   dom.nodeHint.textContent = `${totals.nodes} 台电脑 · ${totals.online} 台在线`;
 
   dom.nodes.innerHTML = nodes.map((node) => {
@@ -153,7 +160,7 @@ function render() {
         <span class="status-chip ${status.className}">${status.text}</span>
         <div>
           <strong>${escapeHtml(node.name)} · ${escapeHtml(thread.title || thread.preview || "未命名任务")}</strong>
-          <p>${escapeHtml(thread.cwd || thread.preview || thread.provider)}</p>
+          <p>${escapeHtml(thread.latestFinalMessage || thread.latestMessage || thread.cwd || thread.preview || thread.provider)}</p>
         </div>
       </article>
     `;

@@ -49,6 +49,7 @@ const state = {
   inboxFilter: "unread",
   nodeQuery: "",
   replyDrafts: new Map(),
+  lastUnreadCount: null,
 };
 
 function readConfig() {
@@ -324,6 +325,34 @@ function showToast(message) {
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2600);
+}
+
+async function ensureBrowserNotifications() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const permission = await Notification.requestPermission();
+  return permission === "granted";
+}
+
+function notifyUnreadChanges(dashboard) {
+  const nodes = dashboard?.nodes ?? [];
+  const unread = nodes.flatMap((node) => (node.notifications ?? [])
+    .filter((notice) => !notice.readAt)
+    .map((notice) => ({ node, notice })));
+  const count = unread.length;
+  if (state.lastUnreadCount == null) {
+    state.lastUnreadCount = count;
+    return;
+  }
+  if (count > state.lastUnreadCount && "Notification" in window && Notification.permission === "granted") {
+    const latest = unread.sort((a, b) => toMillis(b.notice.createdAt) - toMillis(a.notice.createdAt))[0];
+    new Notification(`CodexHub：${latest?.notice?.title || "新的待处理事项"}`, {
+      body: `${latest?.node?.name || "电脑"} · ${latest?.notice?.preview || "打开控制台查看详情"}`,
+      tag: latest?.notice?.id || "codexhub-unread",
+    });
+  }
+  state.lastUnreadCount = count;
 }
 
 function scheduleStateRefresh(delay = 300) {
@@ -748,6 +777,7 @@ async function loadState() {
   }
   try {
     const dashboard = await apiFetch("/api/state");
+    notifyUnreadChanges(dashboard);
     state.dashboard = dashboard;
     await loadInstallProfile();
     await loadAuditLogs();
@@ -785,6 +815,7 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     if (payload.type === "state" && payload.state) {
       state.dashboard = payload.state;
+      notifyUnreadChanges(payload.state);
       setConnection(true, `实时 · ${new Date(payload.state.generatedAt).toLocaleTimeString()}`);
       render();
     } else if (payload.type === "commandResult" || payload.type === "commandQueued") {
@@ -908,6 +939,7 @@ async function revokeNode(nodeId) {
 }
 
 dom.saveConfigBtn.addEventListener("click", async () => {
+  await ensureBrowserNotifications().catch(() => false);
   saveConfig({
     server: dom.serverInput.value || window.location.origin,
     token: dom.tokenInput.value,

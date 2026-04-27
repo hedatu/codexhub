@@ -3,8 +3,10 @@ const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const pkg = require("../package.json");
 
 const APP_NAME = "CodexHub Companion";
+const LATEST_RELEASE_API = "https://api.github.com/repos/hedatu/codexhub/releases/latest";
 const WINDOWS_TASKS = ["CodexHubFarfield", "CodexHubAgent"];
 const LINUX_SERVICES = ["codexhub-farfield.service", "codexhub-agent.service"];
 const MACOS_LABELS = ["com.codexhub.farfield", "com.codexhub.agent"];
@@ -69,6 +71,8 @@ const I18N = {
     menuStart: "启动本地服务",
     menuStop: "停止本地服务",
     menuRefresh: "刷新状态",
+    menuCheckUpdate: "检查更新",
+    menuAutoRepair: "自动修复本机服务",
     menuLanguage: "语言",
     menuLaunchAtLogin: "开机启动 Companion",
     menuOpenConfig: "打开配置目录",
@@ -76,6 +80,10 @@ const I18N = {
     menuShowDetails: "显示详情",
     menuQuit: "退出 Companion",
     dialogTitle: "CodexHub 本机状态",
+    updateReady: (version) => `发现新版本 ${version}`,
+    updateCurrent: "当前已是最新版本",
+    autoRepair: "自动修复",
+    lastRepair: "最近修复",
   },
   en: {
     checking: "Checking",
@@ -135,6 +143,8 @@ const I18N = {
     menuStart: "Start Local Services",
     menuStop: "Stop Local Services",
     menuRefresh: "Refresh Status",
+    menuCheckUpdate: "Check for Updates",
+    menuAutoRepair: "Auto Repair Local Services",
     menuLanguage: "Language",
     menuLaunchAtLogin: "Launch Companion at Login",
     menuOpenConfig: "Open Config Folder",
@@ -142,6 +152,10 @@ const I18N = {
     menuShowDetails: "Show Details",
     menuQuit: "Quit Companion",
     dialogTitle: "CodexHub local status",
+    updateReady: (version) => `New version available: ${version}`,
+    updateCurrent: "You are on the latest version",
+    autoRepair: "Auto Repair",
+    lastRepair: "Last Repair",
   },
 };
 
@@ -151,6 +165,8 @@ let currentLanguage = readSettings().language || "zh";
 let lastStatus = I18N[currentLanguage].checking;
 let lastDetails = null;
 let lastConfig = readAgentConfig();
+let repairInFlight = false;
+let lastRepair = null;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
@@ -222,6 +238,10 @@ function writeSettings(settings) {
   fs.writeFileSync(filePath, JSON.stringify(settings, null, 2));
 }
 
+function autoRepairEnabled() {
+  return readSettings().autoRepair !== false;
+}
+
 function text() {
   return I18N[currentLanguage] || I18N.zh;
 }
@@ -233,6 +253,44 @@ async function setLanguage(language) {
   rebuildMenu();
   if (statusWindow && !statusWindow.isDestroyed()) {
     await openStatusWindow();
+  }
+}
+
+function compareVersion(a, b) {
+  const pa = String(a || "0").replace(/^v/, "").split(".").map((part) => Number(part) || 0);
+  const pb = String(b || "0").replace(/^v/, "").split(".").map((part) => Number(part) || 0);
+  for (let index = 0; index < Math.max(pa.length, pb.length); index += 1) {
+    const diff = (pa[index] || 0) - (pb[index] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+async function checkForUpdates(interactive = true) {
+  try {
+    const result = await fetchJson(LATEST_RELEASE_API);
+    if (!result.ok) throw new Error(result.payload?.message || `HTTP ${result.status}`);
+    const latest = String(result.payload?.tag_name || "").replace(/^v/, "");
+    if (latest && compareVersion(latest, pkg.version) > 0) {
+      const choice = await dialog.showMessageBox({
+        type: "info",
+        buttons: [currentLanguage === "en" ? "Open Release" : "打开下载页", currentLanguage === "en" ? "Later" : "稍后"],
+        defaultId: 0,
+        message: text().updateReady(latest),
+        detail: result.payload?.html_url || "https://github.com/hedatu/codexhub/releases/latest",
+      });
+      if (choice.response === 0) await shell.openExternal(result.payload.html_url);
+      return { ok: true, latest, updateAvailable: true };
+    }
+    if (interactive) {
+      await dialog.showMessageBox({ type: "info", message: text().updateCurrent, detail: `${APP_NAME} ${pkg.version}` });
+    }
+    return { ok: true, latest: latest || pkg.version, updateAvailable: false };
+  } catch (error) {
+    if (interactive) {
+      await dialog.showMessageBox({ type: "warning", message: currentLanguage === "en" ? "Update check failed" : "检查更新失败", detail: error.message });
+    }
+    return { ok: false, error: error.message };
   }
 }
 
@@ -467,6 +525,8 @@ async function queryStatus() {
     installDir: installDir(),
     logFolder: logFolder(),
     startup: await startupSettings(),
+    autoRepair: { enabled: autoRepairEnabled(), lastRepair },
+    version: pkg.version,
     config: lastConfig,
     services: await serviceDetails(),
     farfield: await queryFarfieldHealth(lastConfig),
@@ -491,6 +551,31 @@ async function startServices() {
     for (const service of LINUX_SERVICES) await run("systemctl", ["--user", "start", service]);
   }
   await refresh();
+}
+
+function needsRepair(details) {
+  const services = details.services || [];
+  const serviceBroken = services.some((service) => !serviceOk(service));
+  return serviceBroken || !details.farfield?.ok || !details.cloud?.ok;
+}
+
+async function autoRepairTick() {
+  if (!autoRepairEnabled() || repairInFlight) return;
+  repairInFlight = true;
+  try {
+    await queryStatus();
+    if (!needsRepair(lastDetails)) return;
+    await startServices();
+    lastRepair = {
+      at: new Date().toISOString(),
+      reason: summarizeStatus(lastDetails),
+    };
+    writeSettings({ ...readSettings(), lastRepair });
+  } catch (error) {
+    lastRepair = { at: new Date().toISOString(), reason: error.message };
+  } finally {
+    repairInFlight = false;
+  }
 }
 
 async function stopServices() {
@@ -653,11 +738,20 @@ function statusHtml(details) {
         <section class="card">
           <h2>${escapeHtml(tx.node)}</h2>
           <div class="kv">
+            <div><span>Companion</span><strong>${escapeHtml(details.version || pkg.version)}</strong></div>
             <div><span>${escapeHtml(tx.name)}</span><strong>${escapeHtml(config.nodeName || config.nodeId || os.hostname())}</strong></div>
             <div><span>${escapeHtml(tx.nodeId)}</span><strong>${escapeHtml(config.nodeId || tx.notConfigured)}</strong></div>
             <div><span>${escapeHtml(tx.server)}</span><strong>${escapeHtml(config.server || tx.notConfigured)}</strong></div>
             <div><span>${escapeHtml(tx.config)}</span><strong><code>${escapeHtml(details.configPath)}</code></strong></div>
           </div>
+        </section>
+        <section class="card">
+          <h2>${escapeHtml(tx.autoRepair)}</h2>
+          <div class="kv">
+            <div><span>${escapeHtml(tx.status)}</span><strong>${details.autoRepair?.enabled ? tx.enabled : tx.disabled}</strong></div>
+            <div><span>${escapeHtml(tx.lastRepair)}</span><strong>${escapeHtml(details.autoRepair?.lastRepair?.at ? formatTime(details.autoRepair.lastRepair.at) : tx.never)}</strong></div>
+          </div>
+          ${details.autoRepair?.lastRepair?.reason ? `<p>${escapeHtml(details.autoRepair.lastRepair.reason)}</p>` : ""}
         </section>
         <section class="card">
           <h2>${escapeHtml(tx.cloud)}</h2>
@@ -758,6 +852,16 @@ function rebuildMenu() {
     { label: tx.menuStart, click: startServices },
     { label: tx.menuStop, click: stopServices },
     { label: tx.menuRefresh, click: refresh },
+    { label: tx.menuCheckUpdate, click: () => checkForUpdates(true) },
+    {
+      label: tx.menuAutoRepair,
+      type: "checkbox",
+      checked: autoRepairEnabled(),
+      click: (menuItem) => {
+        writeSettings({ ...readSettings(), autoRepair: menuItem.checked });
+        rebuildMenu();
+      },
+    },
     { type: "separator" },
     {
       label: tx.menuLanguage,
@@ -803,6 +907,9 @@ app.whenReady().then(async () => {
   rebuildMenu();
   await refresh();
   setInterval(refresh, 30_000);
+  setInterval(autoRepairTick, 60_000);
+  setTimeout(() => checkForUpdates(false), 15_000);
+  setTimeout(autoRepairTick, 20_000);
 });
 
 app.on("window-all-closed", (event) => {

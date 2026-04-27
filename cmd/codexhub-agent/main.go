@@ -459,7 +459,7 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 			At:    event["timestamp"],
 			Phase: stringValue(payload["phase"]),
 		}
-		if len(recentMessages) < 6 {
+		if len(recentMessages) < 20 {
 			recentMessages = append(recentMessages, codexhub.ThreadMessage{Text: entry.Text, At: entry.At, Phase: entry.Phase})
 		}
 		if latestFinal == nil && entry.Phase == "final_answer" {
@@ -467,7 +467,7 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 		} else if latestProgress == nil && entry.Phase != "final_answer" {
 			latestProgress = entry
 		}
-		if latestFinal != nil && latestProgress != nil && len(recentMessages) >= 6 {
+		if latestFinal != nil && latestProgress != nil && len(recentMessages) >= 20 {
 			break
 		}
 	}

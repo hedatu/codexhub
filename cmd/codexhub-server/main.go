@@ -24,17 +24,18 @@ import (
 var version = "dev"
 
 type serverConfig struct {
-	Root         string
-	PublicDir    string
-	Host         string
-	Port         int
-	PublicURL    string
-	AdminToken   string
-	InstallKey   string
-	DataFile     string
-	OfflineAfter time.Duration
-	CommandTTL   time.Duration
-	CommandLease time.Duration
+	Root          string
+	PublicDir     string
+	Host          string
+	Port          int
+	PublicURL     string
+	AdminToken    string
+	ReadonlyToken string
+	InstallKey    string
+	DataFile      string
+	OfflineAfter  time.Duration
+	CommandTTL    time.Duration
+	CommandLease  time.Duration
 }
 
 type appState struct {
@@ -92,17 +93,18 @@ func loadConfig() serverConfig {
 	admin := env("CODEXHUB_ADMIN_TOKEN", env("CODEXHUB_TOKEN", "dev-token"))
 	install := env("CODEXHUB_INSTALL_KEY", env("CODEXHUB_TOKEN", admin))
 	return serverConfig{
-		Root:         root,
-		PublicDir:    filepath.Join(root, "public"),
-		Host:         env("CODEXHUB_HOST", "0.0.0.0"),
-		Port:         port,
-		PublicURL:    stripSlash(os.Getenv("CODEXHUB_PUBLIC_URL")),
-		AdminToken:   admin,
-		InstallKey:   install,
-		DataFile:     os.Getenv("CODEXHUB_DATA_FILE"),
-		OfflineAfter: envDuration("CODEXHUB_OFFLINE_AFTER_MS", 45*time.Second),
-		CommandTTL:   envDuration("CODEXHUB_COMMAND_TTL_MS", 10*time.Minute),
-		CommandLease: envDuration("CODEXHUB_COMMAND_LEASE_MS", time.Minute),
+		Root:          root,
+		PublicDir:     filepath.Join(root, "public"),
+		Host:          env("CODEXHUB_HOST", "0.0.0.0"),
+		Port:          port,
+		PublicURL:     stripSlash(os.Getenv("CODEXHUB_PUBLIC_URL")),
+		AdminToken:    admin,
+		ReadonlyToken: strings.TrimSpace(os.Getenv("CODEXHUB_READONLY_TOKEN")),
+		InstallKey:    install,
+		DataFile:      os.Getenv("CODEXHUB_DATA_FILE"),
+		OfflineAfter:  envDuration("CODEXHUB_OFFLINE_AFTER_MS", 45*time.Second),
+		CommandTTL:    envDuration("CODEXHUB_COMMAND_TTL_MS", 10*time.Minute),
+		CommandLease:  envDuration("CODEXHUB_COMMAND_LEASE_MS", time.Minute),
 	}
 }
 
@@ -174,7 +176,7 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/enroll":
 		s.handleEnroll(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/state":
-		if !s.isAdminAuthed(r) {
+		if !s.isReadAuthed(r) {
 			writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 			return
 		}
@@ -233,7 +235,7 @@ func (s *server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
-	if !s.isAdminAuthed(r) {
+	if !s.isReadAuthed(r) {
 		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 		return
 	}
@@ -274,7 +276,7 @@ func (s *server) handleNodeAPI(w http.ResponseWriter, r *http.Request) {
 	nodeID := parts[2]
 
 	if r.Method == http.MethodGet && len(parts) == 3 {
-		if !s.isAdminAuthed(r) {
+		if !s.isReadAuthed(r) {
 			writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 			return
 		}
@@ -562,7 +564,7 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 }
 
 func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if !s.isAdminAuthed(r) {
+	if !s.isReadAuthed(r) {
 		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 		return
 	}
@@ -619,6 +621,14 @@ func (s *server) dashboardState() map[string]any {
 		totals["waitingReply"] += intNumber(m["waitingReply"])
 		totals["waitingApproval"] += intNumber(m["waitingApproval"])
 		totals["attention"] += intNumber(m["attention"])
+		if health, ok := node["syncHealth"].(map[string]any); ok {
+			totals["unread"] += intNumber(health["unreadNotifications"])
+			if counts, ok := health["commandCounts"].(map[string]int); ok {
+				totals["failedCommands"] += counts["failed"]
+			} else if counts, ok := health["commandCounts"].(map[string]any); ok {
+				totals["failedCommands"] += intNumber(counts["failed"])
+			}
+		}
 	}
 	totals["offline"] = totals["nodes"] - totals["online"]
 	return map[string]any{"ok": true, "generatedAt": nowISO(), "startedAt": startedAt, "totals": totals, "nodes": nodes}
@@ -886,29 +896,41 @@ func threadActivityMillis(thread codexhub.Thread) int64 {
 func (s *server) installProfile(r *http.Request) map[string]any {
 	base := s.publicBaseURL(r)
 	installKey := s.currentInstallKey()
+	releaseVersion := env("CODEXHUB_VERSION", version)
+	if releaseVersion == "dev" || releaseVersion == "" {
+		releaseVersion = "0.4.3"
+	}
+	downloads := map[string]string{
+		"androidApk":         fmt.Sprintf("%s/downloads/codexhub-android-v%s.apk", base, releaseVersion),
+		"windowsAgent":       fmt.Sprintf("%s/downloads/codexhub-windows-agent-v%s.zip", base, releaseVersion),
+		"linuxAgent":         fmt.Sprintf("%s/downloads/codexhub-linux-agent-v%s.zip", base, releaseVersion),
+		"macosAgent":         fmt.Sprintf("%s/downloads/codexhub-macos-agent-v%s.zip", base, releaseVersion),
+		"server":             fmt.Sprintf("%s/downloads/codexhub-server-v%s.zip", base, releaseVersion),
+		"companionInstaller": fmt.Sprintf("%s/downloads/codexhub-companion-installer-windows-x64-v%s.exe", base, releaseVersion),
+	}
 	win := strings.Join([]string{
-		"powershell -ExecutionPolicy Bypass -File .\\scripts\\install-desktop-agent.ps1",
+		fmt.Sprintf("$u=%q; $z=\"$env:TEMP\\codexhub-windows-agent-v%s.zip\"; $d=\"$env:TEMP\\codexhub-agent-v%s\"; Invoke-WebRequest $u -OutFile $z; Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive $z -DestinationPath $d -Force; Set-Location $d; powershell -ExecutionPolicy Bypass -File .\\scripts\\install-desktop-agent.ps1", downloads["windowsAgent"], releaseVersion, releaseVersion),
 		fmt.Sprintf("  -Server %q", base),
 		fmt.Sprintf("  -InstallKey %q", installKey),
 		"  -NodeId \"TMT1\"",
 		"  -NodeName \"TMT1\"",
 	}, " `\n")
 	linux := strings.Join([]string{
-		"bash ./scripts/install-linux-agent.sh",
+		fmt.Sprintf("tmp=$(mktemp -d) && curl -fsSL %q -o \"$tmp/codexhub-linux-agent.zip\" && unzip -q \"$tmp/codexhub-linux-agent.zip\" -d \"$tmp/codexhub-linux-agent\" && cd \"$tmp/codexhub-linux-agent\" && bash ./scripts/install-linux-agent.sh", downloads["linuxAgent"]),
 		fmt.Sprintf("  --server %q", base),
 		fmt.Sprintf("  --install-key %q", installKey),
 		"  --node-id \"$(hostname)\"",
 		"  --node-name \"$(hostname)\"",
 	}, " \\\n")
 	macos := strings.Join([]string{
-		"bash ./scripts/install-macos-agent.sh",
+		fmt.Sprintf("tmp=$(mktemp -d) && curl -fsSL %q -o \"$tmp/codexhub-macos-agent.zip\" && unzip -q \"$tmp/codexhub-macos-agent.zip\" -d \"$tmp/codexhub-macos-agent\" && cd \"$tmp/codexhub-macos-agent\" && bash ./scripts/install-macos-agent.sh", downloads["macosAgent"]),
 		fmt.Sprintf("  --server %q", base),
 		fmt.Sprintf("  --install-key %q", installKey),
 		"  --node-id \"$(scutil --get ComputerName)\"",
 		"  --node-name \"$(scutil --get ComputerName)\"",
 	}, " \\\n")
 	return map[string]any{
-		"ok": true, "serverUrl": base, "adminToken": s.cfg.AdminToken, "installKey": installKey,
+		"ok": true, "version": releaseVersion, "serverUrl": base, "adminToken": s.cfg.AdminToken, "readonlyToken": nullableString(s.cfg.ReadonlyToken), "installKey": installKey, "downloads": downloads,
 		"desktop": map[string]any{"powershell": win, "windows": win, "linux": linux, "macos": macos},
 		"mobile":  map[string]any{"serverUrl": base, "token": s.cfg.AdminToken},
 	}
@@ -1076,6 +1098,11 @@ func (s *server) isAdminAuthed(r *http.Request) bool {
 	return presentedToken(r) == s.cfg.AdminToken
 }
 
+func (s *server) isReadAuthed(r *http.Request) bool {
+	token := presentedToken(r)
+	return token == s.cfg.AdminToken || (s.cfg.ReadonlyToken != "" && token == s.cfg.ReadonlyToken)
+}
+
 func (s *server) isInstallAuthed(r *http.Request, body map[string]any) bool {
 	token := presentedToken(r)
 	installKey := s.currentInstallKey()
@@ -1215,8 +1242,8 @@ func normalizeRecentMessages(value any) []codexhub.ThreadMessage {
 		return nil
 	}
 	start := 0
-	if len(items) > 6 {
-		start = len(items) - 6
+	if len(items) > 20 {
+		start = len(items) - 20
 	}
 	messages := []codexhub.ThreadMessage{}
 	for _, item := range items[start:] {

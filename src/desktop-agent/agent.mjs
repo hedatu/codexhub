@@ -257,13 +257,13 @@ function readLatestSessionMessage(threadId) {
         at: event.timestamp ?? null,
         phase,
       };
-      if (recentMessages.length < 6) recentMessages.push(entry);
+      if (recentMessages.length < 20) recentMessages.push(entry);
       if (!latestFinal && phase === "final_answer") {
         latestFinal = entry;
       } else if (!latestProgress && phase !== "final_answer") {
         latestProgress = entry;
       }
-      if (latestFinal && latestProgress && recentMessages.length >= 6) break;
+      if (latestFinal && latestProgress && recentMessages.length >= 20) break;
     }
   } catch {
     latestFinal = null;

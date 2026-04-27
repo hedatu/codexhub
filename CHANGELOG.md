@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.3
+
+- Added Companion update checks against GitHub Releases.
+- Added Companion auto-repair for local Farfield/agent service health.
+- Added browser notifications for new unread mobile work items.
+- Added read-only token support via `CODEXHUB_READONLY_TOKEN`.
+- Increased synced recent Codex messages to 20 per thread.
+- Updated install profile commands to download release packages from `/downloads`.
+- Added TV dashboard completion and failed-command metrics.
+
 ## v0.4.2
 
 - Added a task delivery timeline to show cloud queue, desktop pickup, Codex forwarding, and reply status.
