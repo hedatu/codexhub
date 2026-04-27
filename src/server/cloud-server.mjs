@@ -47,6 +47,8 @@ const state = {
   sseClients: new Set(),
   agentSummaries: new Map(),
   agentProposals: new Map(),
+  fullContexts: new Map(),
+  proposalAudits: [],
 };
 
 function nowIso() {
@@ -139,6 +141,9 @@ function applyLoadedState(parsed) {
   if (Array.isArray(parsed.auditLogs)) {
     state.auditLogs = parsed.auditLogs.slice(-500);
   }
+  if (Array.isArray(parsed.proposalAudits)) {
+    state.proposalAudits = parsed.proposalAudits.slice(-500);
+  }
   if (Array.isArray(parsed.pushSubscriptions)) {
     state.pushSubscriptions = parsed.pushSubscriptions.slice(-200);
   }
@@ -170,6 +175,7 @@ function persistState() {
     storageDriver: STORAGE_DRIVER,
     installKey: state.installKey,
     auditLogs: state.auditLogs.slice(-500),
+    proposalAudits: state.proposalAudits.slice(-500),
     pushSubscriptions: state.pushSubscriptions.slice(-200),
     nodes: [...state.nodes.values()].map((node) => ({
       ...node,
@@ -269,6 +275,30 @@ function recordAudit(type, actor, details = {}) {
     state.auditLogs.splice(0, state.auditLogs.length - 500);
   }
   sendEvent({ type: "audit", entry });
+  return entry;
+}
+
+function recordProposalAudit(event, actor, nodeId, threadId, proposal, commandId = "", decision = "") {
+  if (!proposal?.proposalId) return null;
+  const entry = {
+    id: randomUUID(),
+    at: nowIso(),
+    event,
+    nodeId: nodeId || proposal.nodeId || "",
+    threadId: threadId || proposal.threadId || "",
+    proposalId: proposal.proposalId,
+    actor,
+    risk: proposal.risk ?? "",
+    decision,
+    commandId,
+    contextSignature: proposal.contextSignature ?? "",
+    proposal,
+  };
+  state.proposalAudits.push(entry);
+  if (state.proposalAudits.length > 500) {
+    state.proposalAudits.splice(0, state.proposalAudits.length - 500);
+  }
+  sendEvent({ type: "proposalAudit", entry });
   return entry;
 }
 
@@ -539,6 +569,36 @@ function valueTime(value) {
   if (typeof value === "number") return value < 10_000_000_000 ? value * 1000 : value;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value ?? fallback);
+  const numeric = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function contextKey(nodeId, threadId) {
+  return `${nodeId}:${threadId}`;
+}
+
+function fullContextFromCommandResult(nodeId, fallbackThreadId, body) {
+  const result = body?.result;
+  if (!result || typeof result !== "object") return null;
+  const fullContext = {
+    ...result,
+    threadId: String(result.threadId || fallbackThreadId || ""),
+    nodeId,
+    mode: result.mode || "full",
+    messages: Array.isArray(result.messages) ? result.messages : [],
+    collectedAt: result.collectedAt || nowIso(),
+  };
+  if (!fullContext.threadId) return null;
+  fullContext.messageCount = Number.isFinite(Number(result.messageCount))
+    ? Number(result.messageCount)
+    : fullContext.messages.length;
+  fullContext.truncated = Boolean(result.truncated);
+  fullContext.redacted = Boolean(result.redacted);
+  return fullContext;
 }
 
 function sortThreads(threads) {
@@ -1122,6 +1182,29 @@ function buildAgentProposal(contextBundle, body = {}) {
   return proposal;
 }
 
+function proposalFromAction(nodeId, action) {
+  const proposalId = String(action.proposalId ?? "").trim();
+  if (!proposalId) return null;
+  return state.agentProposals.get(proposalId) ?? {
+    proposalId,
+    threadId: String(action.threadId ?? ""),
+    nodeId,
+    agentId: "",
+    policyId: "",
+    kind: String(action.kind ?? ""),
+    text: "",
+    risk: String(action.proposalRisk ?? ""),
+    confidence: 0,
+    rationale: "",
+    boundaries: [],
+    requiresHumanApproval: true,
+    createdAt: nowIso(),
+    expiresAt: "",
+    contextSignature: String(action.proposalContextSignature ?? ""),
+    contextSummary: "",
+  };
+}
+
 function getOrCreateNode(nodeId) {
   const existing = state.nodes.get(nodeId);
   if (existing) return existing;
@@ -1538,6 +1621,7 @@ const server = http.createServer(async (req, res) => {
           const contextBundle = buildThreadContextBundle(node, thread);
           const proposal = buildAgentProposal(contextBundle, body);
           state.agentProposals.set(proposal.proposalId, proposal);
+          recordProposalAudit("created", "admin", nodeId, threadId, proposal);
           if (state.agentProposals.size > 200) {
             const oldest = [...state.agentProposals.keys()][0];
             state.agentProposals.delete(oldest);
@@ -1555,6 +1639,109 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        if (req.method === "GET" && parts[3] === "threads" && parts[4] && parts[5] === "context-bundle") {
+          const mode = String(url.searchParams.get("mode") || "compressed").toLowerCase();
+          if (mode === "full") {
+            if (!isAdminAuthed(req, url)) {
+              writeJson(res, 401, { ok: false, error: "Unauthorized" });
+              return;
+            }
+          } else if (!isReadAuthed(req, url)) {
+            writeJson(res, 401, { ok: false, error: "Unauthorized" });
+            return;
+          }
+          const threadId = decodeURIComponent(parts[4]);
+          const thread = (node.threads ?? []).map(normalizeThread).find((item) => item.id === threadId);
+          if (!thread) {
+            writeJson(res, 404, { ok: false, error: "Thread not found" });
+            return;
+          }
+          const contextBundle = buildThreadContextBundle(node, thread);
+          if (mode !== "full") {
+            recordAudit("thread.context.read", isAdminAuthed(req, url) ? "admin" : "readonly", {
+              nodeId,
+              threadId,
+              mode: "compressed",
+              contextSignature: contextBundle.contextSignature,
+            });
+            writeJson(res, 200, { ok: true, mode: "compressed", status: "ready", contextBundle });
+            return;
+          }
+          const fullContext = state.fullContexts.get(contextKey(nodeId, threadId));
+          if (fullContext) {
+            recordAudit("thread.context.read", "admin", {
+              nodeId,
+              threadId,
+              mode: "full",
+              contextSignature: fullContext.contextSignature ?? "",
+            });
+            writeJson(res, 200, { ok: true, mode: "full", status: "ready", contextBundle, fullContext });
+            return;
+          }
+          recordAudit("thread.context.read.miss", "admin", { nodeId, threadId, mode: "full" });
+          writeJson(res, 202, {
+            ok: true,
+            mode: "full",
+            status: "not_ready",
+            contextBundle,
+            message: "Full context has not been collected. POST context-request first.",
+          });
+          return;
+        }
+
+        if (req.method === "POST" && parts[3] === "threads" && parts[4] && parts[5] === "context-request") {
+          if (!isAdminAuthed(req, url)) {
+            writeJson(res, 401, { ok: false, error: "Unauthorized" });
+            return;
+          }
+          const threadId = decodeURIComponent(parts[4]);
+          const body = await readBody(req);
+          const thread = (node.threads ?? []).map(normalizeThread).find((item) => item.id === threadId);
+          if (!thread) {
+            writeJson(res, 404, { ok: false, error: "Thread not found" });
+            return;
+          }
+          const contextBundle = buildThreadContextBundle(node, thread);
+          const maxMessages = clampNumber(body.maxMessages ?? body.limit, 200, 1, 2000);
+          const maxChars = clampNumber(body.maxChars, 240000, 1000, 2_000_000);
+          const command = queueCommand(node, {
+            kind: "readThreadContext",
+            provider: thread.provider ?? "codex",
+            threadId,
+            mode: "full",
+            maxMessages,
+            maxChars,
+            redact: true,
+          });
+          recordAudit("thread.context.requested", "admin", {
+            nodeId,
+            threadId,
+            commandId: command.id,
+            mode: "full",
+            maxMessages,
+            maxChars,
+            contextSignature: contextBundle.contextSignature,
+          });
+          persistState();
+          sendEvent({ type: "commandQueued", nodeId, command });
+          writeJson(res, 202, { ok: true, mode: "full", status: "queued", command, contextBundle });
+          return;
+        }
+
+        if (req.method === "GET" && parts[3] === "threads" && parts[4] && parts[5] === "proposals") {
+          if (!isAdminAuthed(req, url)) {
+            writeJson(res, 401, { ok: false, error: "Unauthorized" });
+            return;
+          }
+          const threadId = decodeURIComponent(parts[4]);
+          const proposals = [...state.agentProposals.values()].filter((proposal) => proposal.nodeId === nodeId && proposal.threadId === threadId);
+          const audits = [...state.proposalAudits]
+            .reverse()
+            .filter((entry) => entry.nodeId === nodeId && entry.threadId === threadId);
+          writeJson(res, 200, { ok: true, nodeId, threadId, proposals, audits });
+          return;
+        }
+
         if (req.method === "POST" && parts[3] === "actions") {
           if (!isAdminAuthed(req, url)) {
             writeJson(res, 401, { ok: false, error: "Unauthorized" });
@@ -1567,6 +1754,11 @@ const server = http.createServer(async (req, res) => {
             return;
           }
           const command = queueCommand(node, action);
+          const proposal = proposalFromAction(nodeId, action);
+          if (proposal) {
+            const decision = String(action.proposalDecision || "queued");
+            recordProposalAudit(decision, "admin", nodeId, String(action.threadId ?? proposal.threadId ?? ""), proposal, command.id, decision);
+          }
           recordAudit("command.queued", "admin", { nodeId, commandId: command.id, kind: action.kind, threadId: action.threadId ?? null });
           persistState();
           sendEvent({ type: "commandQueued", nodeId, command });
@@ -1608,6 +1800,30 @@ const server = http.createServer(async (req, res) => {
           command.status = body.ok ? "done" : "failed";
           command.completedAt = nowIso();
           command.result = body;
+          if (command.action?.kind === "readThreadContext") {
+            if (command.status === "done") {
+              const fullContext = fullContextFromCommandResult(nodeId, command.action?.threadId, body);
+              if (fullContext) {
+                state.fullContexts.set(contextKey(nodeId, fullContext.threadId), fullContext);
+                recordAudit("thread.context.ready", "node", {
+                  nodeId,
+                  threadId: fullContext.threadId,
+                  commandId,
+                  messageCount: fullContext.messageCount,
+                  truncated: fullContext.truncated,
+                  redacted: fullContext.redacted,
+                  contextSignature: fullContext.contextSignature ?? "",
+                });
+              }
+            } else {
+              recordAudit("thread.context.failed", "node", {
+                nodeId,
+                threadId: command.action?.threadId ?? null,
+                commandId,
+                error: body.error ?? "",
+              });
+            }
+          }
           if (command.status === "failed" && command.action?.threadId) {
             addNodeNotification(node, {
               type: "commandFailed",

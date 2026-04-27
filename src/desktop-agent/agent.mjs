@@ -1,6 +1,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 const config = parseArgs(process.argv.slice(2));
 const CONFIG_PATH = path.resolve(
@@ -214,6 +215,12 @@ function valueTime(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value ?? fallback);
+  const numeric = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+  return Math.max(min, Math.min(max, numeric));
+}
+
 function normalizeThreads(sidebar, health) {
   const rows = sidebar?.rows ?? sidebar?.data ?? sidebar?.threads ?? [];
   if (!Array.isArray(rows)) return [];
@@ -365,6 +372,88 @@ function readLatestSessionMessage(threadId) {
   return value;
 }
 
+const SECRET_REDACTORS = [
+  [/(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*['"]?[^'"\s,}]+/gi, "$1=[REDACTED]"],
+  [/bearer\s+[a-z0-9._~+/=-]{12,}/gi, "Bearer [REDACTED]"],
+  [/sk-[a-zA-Z0-9_-]{12,}/g, "sk-[REDACTED]"],
+];
+
+function redactSensitiveText(text) {
+  return SECRET_REDACTORS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), String(text ?? ""));
+}
+
+function fullContextSignature(threadId, messages) {
+  const hash = createHash("sha256");
+  hash.update(String(threadId));
+  for (const message of messages) {
+    hash.update(`|${message.at ?? ""}|${message.role ?? ""}|${message.phase ?? ""}|${message.text ?? ""}`);
+  }
+  return hash.digest("hex").slice(0, 20);
+}
+
+function readFullSessionContext(threadId, maxMessages = 200, maxChars = 240000, redact = true) {
+  const filePath = sessionFileForThread(threadId);
+  if (!filePath) throw new Error(`session file not found for thread ${threadId}`);
+  const lines = fs.readFileSync(filePath, "utf8").trimEnd().split(/\r?\n/);
+  let messages = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const transcript = extractTranscriptEntry(event);
+    if (!transcript?.text?.trim()) continue;
+    const text = redact ? redactSensitiveText(transcript.text) : transcript.text;
+    messages.push({
+      text,
+      at: event.timestamp ?? null,
+      phase: event.payload?.phase ?? transcript.phase ?? null,
+      role: transcript.role ?? null,
+    });
+  }
+  let truncated = false;
+  if (messages.length > maxMessages) {
+    messages = messages.slice(-maxMessages);
+    truncated = true;
+  }
+  let totalChars = 0;
+  let start = messages.length;
+  while (start > 0) {
+    const size = String(messages[start - 1].text ?? "").length;
+    if (totalChars + size > maxChars && start < messages.length) break;
+    if (totalChars + size > maxChars && start === messages.length) {
+      messages[start - 1] = {
+        ...messages[start - 1],
+        text: String(messages[start - 1].text ?? "").slice(0, maxChars),
+      };
+      truncated = true;
+      totalChars = maxChars;
+      start -= 1;
+      break;
+    }
+    totalChars += size;
+    start -= 1;
+  }
+  if (start > 0) {
+    messages = messages.slice(start);
+    truncated = true;
+  }
+  return {
+    threadId,
+    mode: "full",
+    sessionFile: path.basename(filePath),
+    messageCount: messages.length,
+    truncated,
+    redacted: Boolean(redact),
+    collectedAt: new Date().toISOString(),
+    contextSignature: fullContextSignature(threadId, messages),
+    messages,
+  };
+}
+
 function deriveMetrics(threads) {
   return {
     running: threads.filter((thread) => thread.isGenerating).length,
@@ -415,6 +504,16 @@ async function executeCommand(command) {
     sessionFileIndex = null;
     SESSION_CACHE.clear();
     return { ok: true, skipped: false, message: "refresh acknowledged" };
+  }
+
+  if (action.kind === "readThreadContext") {
+    if (!action.threadId) throw new Error("readThreadContext requires threadId");
+    return readFullSessionContext(
+      String(action.threadId),
+      clampNumber(action.maxMessages ?? action.limit, 200, 1, 2000),
+      clampNumber(action.maxChars, 240000, 1000, 2_000_000),
+      action.redact !== false,
+    );
   }
 
   if (action.kind === "sendMessage") {
