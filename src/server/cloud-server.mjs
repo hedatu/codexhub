@@ -1550,7 +1550,7 @@ const server = http.createServer(async (req, res) => {
             contextSignature: contextBundle.contextSignature,
           });
           persistState();
-          sendEvent({ type: "agentProposalCreated", nodeId, threadId, proposal });
+          sendEvent({ type: "agentProposalCreated", nodeId, threadId, proposal, contextBundle });
           writeJson(res, 200, { ok: true, proposal, contextBundle });
           return;
         }

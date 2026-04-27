@@ -1324,6 +1324,7 @@ function connectEvents() {
       const thread = state.view?.threads.find((item) => item.nodeIdThreadId === key);
       state.agentDrafts.set(key, {
         ...payload.proposal,
+        contextBundle: payload.contextBundle || payload.proposal.contextBundle || null,
         sourceUpdatedAt: thread ? threadUpdatedAt(thread) : payload.proposal.createdAt,
       });
     }

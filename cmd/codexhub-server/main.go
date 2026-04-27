@@ -969,7 +969,7 @@ func (s *server) handleAgentDraft(w http.ResponseWriter, r *http.Request, nodeID
 	})
 	s.state.mu.Unlock()
 	s.persistState()
-	s.sendEvent(map[string]any{"type": "agentProposalCreated", "nodeId": nodeID, "threadId": threadID, "proposal": proposal})
+	s.sendEvent(map[string]any{"type": "agentProposalCreated", "nodeId": nodeID, "threadId": threadID, "proposal": proposal, "contextBundle": contextBundle})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "proposal": proposal, "contextBundle": contextBundle})
 }
 
