@@ -63,9 +63,9 @@ case "$ARCH" in
 esac
 
 SERVER_EXEC=""
-if [ -n "$GO_ARCH" ] && [ -x "$INSTALL_DIR/bin/codexhub-server-linux-$GO_ARCH" ]; then
+if [ -n "$GO_ARCH" ] && [ -f "$INSTALL_DIR/bin/codexhub-server-linux-$GO_ARCH" ]; then
   SERVER_EXEC="$INSTALL_DIR/bin/codexhub-server-linux-$GO_ARCH"
-elif [ -x "$INSTALL_DIR/bin/codexhub-server" ]; then
+elif [ -f "$INSTALL_DIR/bin/codexhub-server" ]; then
   SERVER_EXEC="$INSTALL_DIR/bin/codexhub-server"
 fi
 
