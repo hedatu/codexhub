@@ -11,19 +11,19 @@ CodexHub has four moving parts:
 
 | OS | Installer | Autostart | Notes |
 | --- | --- | --- | --- |
-| Windows 10/11 x64, ARM64, x86 | `scripts/install-desktop-agent.ps1` | Task Scheduler | Uses `bin/codexhub-agent-windows-*.exe` when packaged. Includes `codex-wrapper.exe` to avoid Windows `spawn EPERM`. |
-| macOS Intel / Apple Silicon | `scripts/install-macos-agent.sh` | `~/Library/LaunchAgents` | Uses `bin/codexhub-agent-darwin-*` when packaged. |
-| Linux x64 / ARM64 / x86 | `scripts/install-linux-agent.sh` | systemd user service | Uses `bin/codexhub-agent-linux-*` when packaged. Use `loginctl enable-linger` if the service must keep running after logout. |
+| Windows 10/11 x64, ARM64, x86 | `scripts/install-desktop-agent.ps1` | Task Scheduler | Uses `bin/codexhub-agent-windows-*.exe` and `bin/codexhub-farfield-windows-*.exe` when packaged. Includes `codex-wrapper.exe` to avoid Windows `spawn EPERM`. |
+| macOS Intel / Apple Silicon | `scripts/install-macos-agent.sh` | `~/Library/LaunchAgents` | Uses `bin/codexhub-agent-darwin-*` and `bin/codexhub-farfield-darwin-*` when packaged. |
+| Linux x64 / ARM64 / x86 | `scripts/install-linux-agent.sh` | systemd user service | Uses `bin/codexhub-agent-linux-*` and `bin/codexhub-farfield-linux-*` when packaged. Use `loginctl enable-linger` if the service must keep running after logout. |
 
 ## CPU architecture
 
-CodexHub v0.4.0 ships native Go binaries:
+CodexHub ships native Go binaries:
 
 - Windows: x64, ARM64, and x86 agent/server binaries.
 - macOS: Intel x64 and Apple Silicon ARM64 agent/server binaries.
 - Linux: x64, ARM64, and x86 agent/server binaries.
 
-Farfield still uses the local `npx -y @farfield/server@latest` path, so Node.js/npm are still needed on desktop machines when the installer starts Farfield automatically.
+Release agent packages include a pinned Farfield runtime under `farfield-runtime/`. The desktop installer starts that local copy through `codexhub-farfield`; it does not download `@farfield/server@latest` at login. Node.js 20+ is still required to execute Farfield's JavaScript runtime.
 
 ## Tray companion
 
@@ -45,8 +45,8 @@ The local status window checks three layers:
 
 从 v0.4.0 开始，CodexHub 云端服务器和电脑端 agent 都优先使用 Go 二进制：
 
-- Windows 用任务计划，优先运行 `codexhub-agent-windows-*.exe`。
-- macOS 用 LaunchAgents，优先运行 `codexhub-agent-darwin-*`。
-- Linux 用 systemd user service，优先运行 `codexhub-agent-linux-*`。
+- Windows 用任务计划，优先运行 `codexhub-agent-windows-*.exe` 和 `codexhub-farfield-windows-*.exe`。
+- macOS 用 LaunchAgents，优先运行 `codexhub-agent-darwin-*` 和 `codexhub-farfield-darwin-*`。
+- Linux 用 systemd user service，优先运行 `codexhub-agent-linux-*` 和 `codexhub-farfield-linux-*`。
 
-Node.js 版本仍然保留为兜底方案。因为 Farfield 本身通过 `npx` 启动，所以电脑端自动启动 Farfield 时仍然需要本机有 Node.js/npm。
+Node.js 版本仍然保留为兜底方案。发布包会内置固定版本的 Farfield runtime，电脑端开机启动时直接运行本地 `farfield-runtime/`，不会再登录时下载 `@farfield/server@latest`。目前 Farfield 仍需要 Node.js 20+ 来执行。

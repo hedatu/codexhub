@@ -385,7 +385,7 @@ async function enrichWindowsMissingServices(rows) {
   return rows.map((row) => {
     if (row.state === "Running") return row;
     const match = row.name === "CodexHubFarfield"
-      ? processes.find((process) => /@farfield[\\/]server|@farfield\/server|PORT\s*=\s*['"]?4311|127\.0\.0\.1:4311/i.test(process.commandLine))
+      ? processes.find((process) => /codexhub-farfield|farfield-runtime|@farfield[\\/]server|@farfield\/server|PORT\s*=\s*['"]?4311|127\.0\.0\.1:4311/i.test(process.commandLine))
       : processes.find((process) => /codexhub-agent|desktop-agent[\\/]agent\.mjs|desktop-agent\\agent\.mjs/i.test(process.commandLine));
     if (!match) return row;
     return {
@@ -621,7 +621,7 @@ async function stopServices() {
 async function windowsManualServiceRunning(task) {
   const processes = await windowsCodexHubProcesses();
   if (task === "CodexHubFarfield") {
-    return processes.some((process) => /@farfield[\\/]server|@farfield\/server|PORT\s*=\s*['"]?4311|127\.0\.0\.1:4311/i.test(process.commandLine));
+    return processes.some((process) => /codexhub-farfield|farfield-runtime|@farfield[\\/]server|@farfield\/server|PORT\s*=\s*['"]?4311|127\.0\.0\.1:4311/i.test(process.commandLine));
   }
   return processes.some((process) => /codexhub-agent|desktop-agent[\\/]agent\.mjs|desktop-agent\\agent\.mjs/i.test(process.commandLine));
 }
@@ -629,10 +629,26 @@ async function windowsManualServiceRunning(task) {
 async function startWindowsManualService(task) {
   if (await windowsManualServiceRunning(task)) return;
   if (task === "CodexHubFarfield") {
-    const wrapperPath = path.join(installDir(), "codex-wrapper.exe");
-    const command = `$env:CODEX_CLI_PATH = '${wrapperPath}'; $env:PORT = '4311'; Set-Location '${process.env.CODEXHUB_FARFIELD_CWD || "C:\\codex"}'; & npx.cmd -y '@farfield/server@latest'`;
-    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], {
-      cwd: process.env.CODEXHUB_FARFIELD_CWD || "C:\\codex",
+    const baseDir = installDir();
+    const launcherPath = path.join(baseDir, "bin", "codexhub-farfield.exe");
+    const runtimeDir = path.join(baseDir, "farfield-runtime");
+    const wrapperPath = path.join(baseDir, "bin", "codex-wrapper.exe");
+    const logDir = path.join(baseDir, "logs");
+    const cwd = process.env.CODEXHUB_FARFIELD_CWD || os.homedir();
+    if (fs.existsSync(launcherPath)) {
+      spawn(launcherPath, ["--runtime", runtimeDir, "--codex-cli", wrapperPath, "--port", "4311", "--cwd", cwd, "--log-dir", logDir], {
+        cwd,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+      return;
+    }
+    const farfieldCli = path.join(runtimeDir, "node_modules", "@farfield", "server", "dist", "cli.js");
+    if (!fs.existsSync(farfieldCli)) return;
+    const command = `$env:CODEX_CLI_PATH = '${wrapperPath}'; $env:PORT = '4311'; Set-Location '${cwd}'; & node.exe '${farfieldCli}'`;
+    spawn("powershell.exe", ["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", command], {
+      cwd,
       detached: true,
       stdio: "ignore",
       windowsHide: true,
@@ -661,7 +677,7 @@ async function startWindowsManualService(task) {
 async function stopWindowsManualServices() {
   const command = `
     Get-CimInstance Win32_Process |
-      Where-Object { $_.CommandLine -match '@farfield/server|desktop-agent\\\\agent\\.mjs|desktop-agent/agent\\.mjs|codexhub-agent' } |
+      Where-Object { $_.CommandLine -match 'codexhub-farfield|farfield-runtime|@farfield/server|desktop-agent\\\\agent\\.mjs|desktop-agent/agent\\.mjs|codexhub-agent' } |
       ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   `;
   await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], { timeout: 30_000 });

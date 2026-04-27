@@ -6,6 +6,7 @@ INSTALL_KEY=""
 NODE_ID="$(scutil --get ComputerName 2>/dev/null || hostname)"
 NODE_NAME="$NODE_ID"
 FARFIELD_URL="http://127.0.0.1:4311"
+FARFIELD_VERSION="${CODEXHUB_FARFIELD_VERSION:-0.2.2}"
 INSTALL_DIR="${CODEXHUB_INSTALL_DIR:-$HOME/Library/Application Support/CodexHub}"
 CONFIG_DIR="${CODEXHUB_CONFIG_DIR:-$HOME/Library/Application Support/CodexHub}"
 LOG_DIR="$HOME/Library/Logs/CodexHub"
@@ -31,8 +32,8 @@ if [ -z "$SERVER" ] || [ -z "$INSTALL_KEY" ]; then
   exit 1
 fi
 
-if [ "$NO_FARFIELD" -eq 0 ] && ! command -v npx >/dev/null 2>&1; then
-  echo "npx is required to run Farfield." >&2
+if [ "$NO_FARFIELD" -eq 0 ] && ! command -v node >/dev/null 2>&1; then
+  echo "Node.js 20+ is required to run bundled Farfield." >&2
   exit 1
 fi
 
@@ -71,6 +72,31 @@ else
   cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
 fi
 
+FARFIELD_BIN=""
+if [ "$NO_FARFIELD" -eq 0 ]; then
+  RUNTIME_DIR="$INSTALL_DIR/farfield-runtime"
+  if [ -d "$REPO_ROOT/farfield-runtime" ]; then
+    rm -rf "$RUNTIME_DIR"
+    cp -R "$REPO_ROOT/farfield-runtime" "$RUNTIME_DIR"
+  elif [ ! -f "$RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" ]; then
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "Bundled Farfield runtime was not found and npm is unavailable." >&2
+      exit 1
+    fi
+    mkdir -p "$RUNTIME_DIR"
+    npm install --prefix "$RUNTIME_DIR" "@farfield/server@$FARFIELD_VERSION" --omit=dev --no-audit --no-fund
+  fi
+  if [ ! -f "$RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" ]; then
+    echo "Farfield runtime is missing: $RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" >&2
+    exit 1
+  fi
+  if [ -n "$GO_ARCH" ] && [ -f "$REPO_ROOT/bin/codexhub-farfield-darwin-$GO_ARCH" ]; then
+    FARFIELD_BIN="$INSTALL_DIR/bin/codexhub-farfield"
+    cp "$REPO_ROOT/bin/codexhub-farfield-darwin-$GO_ARCH" "$FARFIELD_BIN"
+    chmod +x "$FARFIELD_BIN"
+  fi
+fi
+
 CONFIG_PATH="$CONFIG_DIR/agent.json"
 cat > "$CONFIG_PATH" <<EOF_JSON
 {
@@ -88,7 +114,7 @@ chmod 600 "$CONFIG_PATH"
 if [ "$NO_LAUNCHD" -eq 0 ]; then
   LAUNCH_DIR="$HOME/Library/LaunchAgents"
   mkdir -p "$LAUNCH_DIR"
-  CODEX_BIN="$(command -v codex || true)"
+  CODEX_BIN="$(command -v codex || echo codex)"
   if [ -n "$AGENT_BIN" ]; then
     AGENT_PROGRAM="$AGENT_BIN"
     AGENT_ARGS=""
@@ -99,15 +125,36 @@ if [ "$NO_LAUNCHD" -eq 0 ]; then
   fi
 
   if [ "$NO_FARFIELD" -eq 0 ]; then
+    if [ -n "$FARFIELD_BIN" ]; then
+      FARFIELD_PROGRAM="$FARFIELD_BIN"
+      FARFIELD_ARGS="<string>--runtime</string>
+    <string>$RUNTIME_DIR</string>
+    <string>--codex-cli</string>
+    <string>$CODEX_BIN</string>
+    <string>--port</string>
+    <string>4311</string>
+    <string>--cwd</string>
+    <string>$HOME</string>
+    <string>--log-dir</string>
+    <string>$LOG_DIR</string>"
+    else
+      FARFIELD_PROGRAM="$(command -v node)"
+      FARFIELD_ARGS="<string>$RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js</string>"
+    fi
     cat > "$LAUNCH_DIR/com.codexhub.farfield.plist" <<EOF_PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.codexhub.farfield</string>
   <key>ProgramArguments</key><array>
-    <string>/bin/zsh</string><string>-lc</string>
-    <string>export PORT=4311 CODEX_CLI_PATH="$CODEX_BIN"; cd "$HOME"; npx -y @farfield/server@latest</string>
+    <string>$FARFIELD_PROGRAM</string>
+    $FARFIELD_ARGS
   </array>
+  <key>WorkingDirectory</key><string>$HOME</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PORT</key><string>4311</string>
+    <key>CODEX_CLI_PATH</key><string>$CODEX_BIN</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$LOG_DIR/farfield.out.log</string>

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.7
+
+- Added a native `codexhub-farfield` launcher so Windows can start the local Farfield server without visible command windows.
+- Bundled Farfield runtime into Windows, Linux, and macOS agent release packages instead of using `npx @farfield/server@latest` at login.
+- Updated desktop installers and Companion repair logic to start the packaged Farfield runtime from the CodexHub install directory.
+- Moved Farfield logs into the CodexHub log folder for normal troubleshooting.
+
 ## v0.4.6
 
 - Fixed Windows Companion auto-repair starting duplicate desktop agents when scheduled tasks are missing.

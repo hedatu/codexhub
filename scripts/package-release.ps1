@@ -1,5 +1,6 @@
 param(
-  [string]$Version = "0.4.6"
+  [string]$Version = "0.4.7",
+  [string]$FarfieldVersion = "0.2.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,6 +86,24 @@ function Copy-GoBinaries($patterns, $target) {
   }
 }
 
+function Install-FarfieldRuntimePackage($target) {
+  $runtimeDir = Join-Path $target "farfield-runtime"
+  $cliPath = Join-Path $runtimeDir "node_modules\@farfield\server\dist\cli.js"
+  if (Test-Path -LiteralPath $cliPath) {
+    return
+  }
+  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if (-not $npm) {
+    Write-Warning "npm.cmd was not found; $target will not include bundled Farfield runtime."
+    return
+  }
+  New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+  & $npm.Source install --prefix $runtimeDir "@farfield/server@$FarfieldVersion" --omit=dev --no-audit --no-fund
+  if (-not (Test-Path -LiteralPath $cliPath)) {
+    throw "Failed to prepare bundled Farfield runtime at $cliPath"
+  }
+}
+
 $sourceDir = Join-Path $stage "codexhub-source-v$Version"
 Copy-Items $common $sourceDir
 Compress-Archive -Path (Join-Path $sourceDir "*") -DestinationPath (Join-Path $dist "codexhub-source-v$Version.zip") -Force
@@ -117,6 +136,7 @@ Copy-Items @(
   "README.md",
   "LICENSE",
   "cmd\codexhub-agent",
+  "cmd\codexhub-farfield",
   "internal",
   "src\desktop-agent",
   "scripts\install-desktop-agent.ps1",
@@ -124,7 +144,8 @@ Copy-Items @(
   "scripts\windows\codex-wrapper.go",
   "docs"
 ) $agentDir
-Copy-GoBinaries @("codexhub-agent-windows-*") $agentDir
+Copy-GoBinaries @("codexhub-agent-windows-*", "codexhub-farfield-windows-*") $agentDir
+Install-FarfieldRuntimePackage $agentDir
 $wrapperSource = Join-Path $root "scripts\windows\codex-wrapper.go"
 $wrapperTargetDir = Join-Path $agentDir "scripts\windows"
 $wrapperTarget = Join-Path $wrapperTargetDir "codex-wrapper.exe"
@@ -143,13 +164,15 @@ Copy-Items @(
   "README.md",
   "LICENSE",
   "cmd\codexhub-agent",
+  "cmd\codexhub-farfield",
   "internal",
   "src\desktop-agent",
   "scripts\install-linux-agent.sh",
   "scripts\uninstall-linux-agent.sh",
   "docs"
 ) $linuxAgentDir
-Copy-GoBinaries @("codexhub-agent-linux-*") $linuxAgentDir
+Copy-GoBinaries @("codexhub-agent-linux-*", "codexhub-farfield-linux-*") $linuxAgentDir
+Install-FarfieldRuntimePackage $linuxAgentDir
 Compress-Archive -Path (Join-Path $linuxAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-linux-agent-v$Version.zip") -Force
 
 $macosAgentDir = Join-Path $stage "codexhub-macos-agent-v$Version"
@@ -159,13 +182,15 @@ Copy-Items @(
   "README.md",
   "LICENSE",
   "cmd\codexhub-agent",
+  "cmd\codexhub-farfield",
   "internal",
   "src\desktop-agent",
   "scripts\install-macos-agent.sh",
   "scripts\uninstall-macos-agent.sh",
   "docs"
 ) $macosAgentDir
-Copy-GoBinaries @("codexhub-agent-darwin-*") $macosAgentDir
+Copy-GoBinaries @("codexhub-agent-darwin-*", "codexhub-farfield-darwin-*") $macosAgentDir
+Install-FarfieldRuntimePackage $macosAgentDir
 Compress-Archive -Path (Join-Path $macosAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-macos-agent-v$Version.zip") -Force
 
 $androidDir = Join-Path $stage "codexhub-android-twa-v$Version"

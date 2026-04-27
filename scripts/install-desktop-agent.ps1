@@ -9,6 +9,7 @@ param(
   [string]$NodeName = $env:COMPUTERNAME,
   [string]$FarfieldUrl = "http://127.0.0.1:4311",
   [string]$InstallDir = "$env:ProgramData\CodexHub",
+  [string]$FarfieldVersion = "0.2.2",
   [switch]$NoFarfield,
   [switch]$NoScheduledTask
 )
@@ -33,6 +34,37 @@ function Resolve-Node {
   return $node.Source
 }
 
+function Install-FarfieldRuntime {
+  param(
+    [string]$SourceRoot,
+    [string]$TargetDir,
+    [string]$Version
+  )
+
+  $sourceRuntime = Join-Path $SourceRoot "farfield-runtime"
+  $targetCli = Join-Path $TargetDir "node_modules\@farfield\server\dist\cli.js"
+  if (Test-Path -LiteralPath $targetCli) {
+    return
+  }
+
+  if (Test-Path -LiteralPath $sourceRuntime) {
+    Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TargetDir) | Out-Null
+    Copy-Item -LiteralPath $sourceRuntime -Destination $TargetDir -Recurse -Force
+    return
+  }
+
+  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if (-not $npm) {
+    throw "Bundled Farfield runtime was not found and npm is unavailable. Use a packaged CodexHub agent zip or run with -NoFarfield."
+  }
+  New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+  & $npm.Source install --prefix $TargetDir "@farfield/server@$Version" --omit=dev --no-audit --no-fund
+  if (-not (Test-Path -LiteralPath $targetCli)) {
+    throw "Farfield runtime install failed: $targetCli was not created."
+  }
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $agentSource = Join-Path $repoRoot "src\desktop-agent\agent.mjs"
 $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -41,11 +73,13 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
   default { "amd64" }
 }
 $goAgentSource = Join-Path $repoRoot "bin\codexhub-agent-windows-$arch.exe"
+$goFarfieldSource = Join-Path $repoRoot "bin\codexhub-farfield-windows-$arch.exe"
 $nodeExe = $null
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "src\desktop-agent") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "bin") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "logs") | Out-Null
 $preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $InstallDir "install-preflight.json") -Encoding UTF8
 
 $agentExe = Join-Path $InstallDir "bin\codexhub-agent.exe"
@@ -57,6 +91,11 @@ if (Test-Path -LiteralPath $goAgentSource) {
   }
   $nodeExe = Resolve-Node
   Copy-Item -LiteralPath $agentSource -Destination (Join-Path $InstallDir "src\desktop-agent\agent.mjs") -Force
+}
+
+$farfieldExe = Join-Path $InstallDir "bin\codexhub-farfield.exe"
+if (Test-Path -LiteralPath $goFarfieldSource) {
+  Copy-Item -LiteralPath $goFarfieldSource -Destination $farfieldExe -Force
 }
 
 $wrapperSource = Join-Path $repoRoot "scripts\windows\codex-wrapper.exe"
@@ -96,8 +135,19 @@ if (-not $NoScheduledTask) {
     if (-not (Test-Path -LiteralPath $wrapperPath)) {
       throw "Cannot find scripts\windows\codex-wrapper.exe. Use the packaged Windows agent zip or run with -NoFarfield."
     }
-    $farfieldCommand = "`$env:CODEX_CLI_PATH = '$wrapperPath'; `$env:PORT = '4311'; Set-Location '$env:USERPROFILE'; & npx.cmd -y '@farfield/server@latest'"
-    $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command $farfieldCommand"
+    Resolve-Node | Out-Null
+    $runtimeDir = Join-Path $InstallDir "farfield-runtime"
+    $logDir = Join-Path $InstallDir "logs"
+    Install-FarfieldRuntime -SourceRoot $repoRoot -TargetDir $runtimeDir -Version $FarfieldVersion
+    if (Test-Path -LiteralPath $farfieldExe) {
+      $farfieldArgs = "--runtime `"$runtimeDir`" --codex-cli `"$wrapperPath`" --port 4311 --cwd `"$env:USERPROFILE`" --log-dir `"$logDir`""
+      $farfieldAction = New-ScheduledTaskAction -Execute $farfieldExe -Argument $farfieldArgs
+    } else {
+      $farfieldCli = Join-Path $runtimeDir "node_modules\@farfield\server\dist\cli.js"
+      $nodePath = Resolve-Node
+      $farfieldCommand = "`$env:CODEX_CLI_PATH = '$wrapperPath'; `$env:PORT = '4311'; Set-Location '$env:USERPROFILE'; & '$nodePath' '$farfieldCli'"
+      $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command $farfieldCommand"
+    }
     $farfieldTrigger = New-ScheduledTaskTrigger -AtLogOn
     Register-ScheduledTask -TaskName "CodexHubFarfield" -Action $farfieldAction -Trigger $farfieldTrigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName "CodexHubFarfield" -ErrorAction Stop

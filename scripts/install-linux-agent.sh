@@ -6,8 +6,10 @@ INSTALL_KEY=""
 NODE_ID="$(hostname)"
 NODE_NAME="$NODE_ID"
 FARFIELD_URL="http://127.0.0.1:4311"
+FARFIELD_VERSION="${CODEXHUB_FARFIELD_VERSION:-0.2.2}"
 INSTALL_DIR="${CODEXHUB_INSTALL_DIR:-$HOME/.local/share/codexhub}"
 CONFIG_DIR="${CODEXHUB_CONFIG_DIR:-$HOME/.config/codexhub}"
+LOG_DIR="${CODEXHUB_LOG_DIR:-$INSTALL_DIR/logs}"
 NO_SYSTEMD=0
 NO_FARFIELD=0
 
@@ -30,8 +32,8 @@ if [ -z "$SERVER" ] || [ -z "$INSTALL_KEY" ]; then
   exit 1
 fi
 
-if [ "$NO_FARFIELD" -eq 0 ] && ! command -v npx >/dev/null 2>&1; then
-  echo "npx is required to run Farfield." >&2
+if [ "$NO_FARFIELD" -eq 0 ] && ! command -v node >/dev/null 2>&1; then
+  echo "Node.js 20+ is required to run bundled Farfield." >&2
   exit 1
 fi
 
@@ -46,7 +48,7 @@ case "$ARCH" in
   *) GO_ARCH="" ;;
 esac
 
-mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR"
+mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR" "$LOG_DIR"
 cat > "$INSTALL_DIR/install-preflight.json" <<EOF_PREFLIGHT
 {
   "os": "linux",
@@ -71,6 +73,31 @@ else
   cp "$AGENT_SOURCE" "$INSTALL_DIR/src/desktop-agent/agent.mjs"
 fi
 
+FARFIELD_BIN=""
+if [ "$NO_FARFIELD" -eq 0 ]; then
+  RUNTIME_DIR="$INSTALL_DIR/farfield-runtime"
+  if [ -d "$REPO_ROOT/farfield-runtime" ]; then
+    rm -rf "$RUNTIME_DIR"
+    cp -R "$REPO_ROOT/farfield-runtime" "$RUNTIME_DIR"
+  elif [ ! -f "$RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" ]; then
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "Bundled Farfield runtime was not found and npm is unavailable." >&2
+      exit 1
+    fi
+    mkdir -p "$RUNTIME_DIR"
+    npm install --prefix "$RUNTIME_DIR" "@farfield/server@$FARFIELD_VERSION" --omit=dev --no-audit --no-fund
+  fi
+  if [ ! -f "$RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" ]; then
+    echo "Farfield runtime is missing: $RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js" >&2
+    exit 1
+  fi
+  if [ -n "$GO_ARCH" ] && [ -f "$REPO_ROOT/bin/codexhub-farfield-linux-$GO_ARCH" ]; then
+    FARFIELD_BIN="$INSTALL_DIR/bin/codexhub-farfield"
+    cp "$REPO_ROOT/bin/codexhub-farfield-linux-$GO_ARCH" "$FARFIELD_BIN"
+    chmod +x "$FARFIELD_BIN"
+  fi
+fi
+
 CONFIG_PATH="$CONFIG_DIR/agent.json"
 cat > "$CONFIG_PATH" <<EOF_JSON
 {
@@ -91,10 +118,15 @@ if [ "$NO_SYSTEMD" -eq 0 ]; then
   else
     USER_SYSTEMD="$HOME/.config/systemd/user"
     mkdir -p "$USER_SYSTEMD"
-    NPX_BIN="$(command -v npx || true)"
-    CODEX_BIN="$(command -v codex || true)"
+    CODEX_BIN="$(command -v codex || echo codex)"
 
     if [ "$NO_FARFIELD" -eq 0 ]; then
+      if [ -n "$FARFIELD_BIN" ]; then
+        FARFIELD_EXEC="$FARFIELD_BIN --runtime $RUNTIME_DIR --codex-cli $CODEX_BIN --port 4311 --cwd $HOME --log-dir $LOG_DIR"
+      else
+        NODE_BIN="$(command -v node)"
+        FARFIELD_EXEC="$NODE_BIN $RUNTIME_DIR/node_modules/@farfield/server/dist/cli.js"
+      fi
       cat > "$USER_SYSTEMD/codexhub-farfield.service" <<EOF_SERVICE
 [Unit]
 Description=CodexHub Farfield local server
@@ -105,9 +137,11 @@ Type=simple
 WorkingDirectory=$HOME
 Environment=PORT=4311
 Environment=CODEX_CLI_PATH=$CODEX_BIN
-ExecStart=$NPX_BIN -y @farfield/server@latest
+ExecStart=$FARFIELD_EXEC
 Restart=always
 RestartSec=3
+StandardOutput=append:$LOG_DIR/farfield.out.log
+StandardError=append:$LOG_DIR/farfield.err.log
 
 [Install]
 WantedBy=default.target

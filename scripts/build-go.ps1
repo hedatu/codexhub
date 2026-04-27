@@ -30,10 +30,13 @@ foreach ($target in $targets) {
   $suffix = "$($target.GOOS)-$($target.GOARCH)$($target.Ext)"
   go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $OutputDir "codexhub-server-$suffix") ./cmd/codexhub-server
   $agentLdflags = "-s -w -X main.version=$Version"
+  $launcherLdflags = "-s -w -X main.version=$Version"
   if ($target.GOOS -eq "windows") {
     $agentLdflags = "$agentLdflags -H=windowsgui"
+    $launcherLdflags = "$launcherLdflags -H=windowsgui"
   }
   go build -trimpath -ldflags $agentLdflags -o (Join-Path $OutputDir "codexhub-agent-$suffix") ./cmd/codexhub-agent
+  go build -trimpath -ldflags $launcherLdflags -o (Join-Path $OutputDir "codexhub-farfield-$suffix") ./cmd/codexhub-farfield
 }
 
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue

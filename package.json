@@ -1,6 +1,6 @@
 {
   "name": "codexhub",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": false,
   "type": "module",
   "description": "Cloud relay dashboard for multiple Farfield/Codex desktop nodes.",
