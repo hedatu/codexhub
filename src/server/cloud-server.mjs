@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { createSign, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createSign, randomBytes, randomUUID } from "node:crypto";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -19,7 +19,7 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
-const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.6";
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.9";
 const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
 const SQLITE_FILE = process.env.CODEXHUB_SQLITE_FILE
   ? path.resolve(process.env.CODEXHUB_SQLITE_FILE)
@@ -45,6 +45,8 @@ const state = {
   pushSubscriptions: [],
   installKey: DEFAULT_INSTALL_KEY,
   sseClients: new Set(),
+  agentSummaries: new Map(),
+  agentProposals: new Map(),
 };
 
 function nowIso() {
@@ -891,6 +893,235 @@ function dashboardState() {
   };
 }
 
+function threadTitle(thread) {
+  const title = String(thread.title ?? "").trim();
+  if (title) return title;
+  const preview = String(thread.preview ?? "").replace(/\s+/g, " ").trim();
+  return preview ? preview.slice(0, 80) : "未命名 Codex 线程";
+}
+
+function threadRepo(thread) {
+  const raw = String(thread.cwd || thread.source || thread.provider || "codex").replaceAll("\\", "/");
+  const parts = raw.split("/").filter(Boolean);
+  if (parts.length >= 2) return `${parts.at(-2)} / ${parts.at(-1)}`;
+  return parts[0] || "codex / workspace";
+}
+
+function compactText(value, limit = 220) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > limit ? `${text.slice(0, limit).trim()}...` : text;
+}
+
+function uniqueLimit(items, limit = 6) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const value = compactText(item, 180);
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function splitMeaningfulLines(text) {
+  return String(text ?? "")
+    .split(/\r?\n|[。；;]/)
+    .map((line) => line.replace(/^[\s\-*•\d.、]+/, "").trim())
+    .filter((line) => line.length >= 6);
+}
+
+function recentRawMessages(thread, limit = 6) {
+  return (thread.recentMessages ?? [])
+    .filter((message) => String(message.text ?? "").trim())
+    .slice(-limit)
+    .map((message) => ({
+      text: compactText(message.text, 900),
+      at: message.at ?? null,
+      phase: message.phase ?? null,
+      role: message.role ?? null,
+    }));
+}
+
+function contextSignature(node, thread) {
+  const hash = createHash("sha256");
+  hash.update(String(node.id));
+  hash.update(String(thread.id));
+  hash.update(String(thread.updatedAt ?? ""));
+  hash.update(String(thread.latestMessageAt ?? ""));
+  hash.update(String(thread.latestFinalMessageAt ?? ""));
+  hash.update(String(thread.latestProgressMessageAt ?? ""));
+  for (const message of thread.recentMessages ?? []) {
+    hash.update(String(message.at ?? ""));
+    hash.update(String(message.phase ?? ""));
+    hash.update(String(message.text ?? "").slice(0, 300));
+  }
+  return hash.digest("hex").slice(0, 20);
+}
+
+function extractFiles(text) {
+  const matches = String(text ?? "").match(/(?:[A-Za-z]:)?(?:[./\\][\w .@()[\]-]+)+\.[A-Za-z0-9]{1,8}/g) ?? [];
+  return uniqueLimit(matches.map((item) => item.replaceAll("\\", "/")), 8);
+}
+
+function extractCommands(lines) {
+  const commandPattern = /\b(npm|pnpm|yarn|node|go|git|python|pytest|powershell|curl|docker|kubectl|sqlite3)\b/i;
+  return uniqueLimit(lines.filter((line) => commandPattern.test(line)), 8);
+}
+
+function extractRiskFlags(text) {
+  const checks = [
+    ["deploy", "部署"],
+    ["production", "生产环境"],
+    ["prod", "生产环境"],
+    ["delete", "删除"],
+    ["rm -rf", "递归删除"],
+    ["git push", "git push"],
+    ["secret", "密钥"],
+    ["token", "令牌"],
+    ["database", "数据库"],
+    ["payment", "支付链路"],
+    ["permission", "权限策略"],
+    ["k8s", "集群变更"],
+    ["kubectl", "集群命令"],
+    ["失败", "失败状态"],
+    ["高风险", "高风险请求"],
+  ];
+  const haystack = String(text ?? "").toLowerCase();
+  return uniqueLimit(checks.filter(([needle]) => haystack.includes(needle)).map(([, label]) => label), 8);
+}
+
+function buildThreadContextBundle(node, thread) {
+  const signature = contextSignature(node, thread);
+  const cacheKey = `${node.id}:${thread.id}`;
+  const cached = state.agentSummaries.get(cacheKey);
+  if (cached?.contextSignature === signature) return cached;
+
+  const status = deriveThreadState(thread);
+  const latest = thread.latestMessage || thread.latestProgressMessage || thread.latestFinalMessage || thread.preview || "";
+  const rawMessages = recentRawMessages(thread);
+  const joined = [
+    thread.title,
+    thread.preview,
+    thread.latestMessage,
+    thread.latestProgressMessage,
+    thread.latestFinalMessage,
+    ...rawMessages.map((message) => message.text),
+  ].filter(Boolean).join("\n");
+  const lines = splitMeaningfulLines(joined);
+  const currentPlan = uniqueLimit(lines.filter((line) => /计划|下一步|需要|建议|将会|准备|todo|next|plan|will|should/i.test(line)), 6);
+  const completedWork = uniqueLimit(lines.filter((line) => /已|完成|实现|修复|新增|更新|通过|done|implemented|fixed|added|updated|passed/i.test(line)), 6);
+  const blockers = uniqueLimit(lines.filter((line) => /失败|错误|阻塞|等待|需要你|审批|确认|error|failed|blocked|waiting|approval|confirm/i.test(line)), 6);
+  const riskFlags = extractRiskFlags(joined);
+  const pending = thread.waitingOnApproval
+    ? "Codex 正在等待审批。"
+    : thread.waitingOnUserInput
+      ? "Codex 正在等待用户回复。"
+      : blockers[0] || "";
+  const contextBundle = {
+    threadId: thread.id,
+    nodeId: node.id,
+    nodeName: node.name ?? node.id,
+    repo: threadRepo(thread),
+    cwd: thread.cwd ?? "",
+    provider: thread.provider ?? "codex",
+    status,
+    userGoal: compactText(threadTitle(thread), 160),
+    currentPlan,
+    completedWork,
+    filesMentioned: extractFiles(joined),
+    commandsRun: extractCommands(lines),
+    blockers,
+    pendingQuestionOrApproval: compactText(pending || latest, 240),
+    latestCodexMessage: compactText(latest, 900),
+    recentRawMessages: rawMessages,
+    riskFlags,
+    summaryModel: "codexhub-extractive-v1",
+    summaryUpdatedAt: nowIso(),
+    contextSignature: signature,
+  };
+  state.agentSummaries.set(cacheKey, contextBundle);
+  if (state.agentSummaries.size > 500) {
+    const oldest = [...state.agentSummaries.keys()][0];
+    state.agentSummaries.delete(oldest);
+  }
+  return contextBundle;
+}
+
+function proposalRisk(contextBundle) {
+  if ((contextBundle.riskFlags ?? []).some((flag) => /生产|删除|push|密钥|数据库|支付|集群|高风险|失败/.test(flag))) {
+    return "high";
+  }
+  if (contextBundle.status === "waiting_approval" || contextBundle.status === "waiting_reply") return "medium";
+  return "low";
+}
+
+function buildProposalText(contextBundle, body = {}) {
+  const intent = String(body.intent ?? "");
+  if (contextBundle.status === "waiting_approval" || intent === "approve") {
+    return [
+      `建议先不要直接放行高风险动作。请 Codex 基于「${contextBundle.userGoal}」补充：`,
+      "1. 将要执行的具体命令或变更范围。",
+      "2. 影响面、回滚方式和验证命令。",
+      "3. 明确避开 deploy、git push、delete、secret access、database mutation。",
+      "如果确认只是低风险代码或文档改动，再由人类批准继续。",
+    ].join("\n");
+  }
+  if (contextBundle.status === "waiting_reply") {
+    return [
+      `请继续处理「${contextBundle.userGoal}」。`,
+      "优先给出最小可验证实现；完成后汇报修改文件、验证命令、剩余风险。",
+      "不要部署、推送、删除文件或访问密钥；遇到这些动作必须再次请求人工确认。",
+    ].join("\n");
+  }
+  if (contextBundle.status === "failed") {
+    return [
+      `请诊断「${contextBundle.userGoal}」的失败原因。`,
+      "先总结最近失败点，再给出最小重试方案；不要扩大变更范围。",
+    ].join("\n");
+  }
+  return [
+    `请基于当前上下文继续推进「${contextBundle.userGoal}」。`,
+    "保持改动最小，先验证再继续；如遇高风险动作，停止并请求人工审批。",
+  ].join("\n");
+}
+
+function buildAgentProposal(contextBundle, body = {}) {
+  const risk = proposalRisk(contextBundle);
+  const proposal = {
+    proposalId: randomUUID(),
+    threadId: contextBundle.threadId,
+    nodeId: contextBundle.nodeId,
+    agentId: "codexhub-agent-proposal-v1",
+    policyId: "human-approved-proposal-v1",
+    kind: String(body.kind ?? "reply"),
+    text: buildProposalText(contextBundle, body),
+    risk,
+    confidence: risk === "high" ? 0.72 : 0.84,
+    rationale: [
+      "基于压缩后的 ThreadContextBundle 生成。",
+      contextBundle.riskFlags?.length ? `风险信号：${contextBundle.riskFlags.join("、")}。` : "未发现明显高风险信号。",
+      "该 proposal 只供人工审核，不会自动写入 Codex。",
+    ].join(" "),
+    boundaries: [
+      "Agent 只能生成 proposal",
+      "人类批准后才下发 action",
+      "禁止 deploy / git push / delete",
+      "禁止 secret access / database mutation",
+      "高风险动作必须二次确认",
+    ],
+    requiresHumanApproval: true,
+    createdAt: nowIso(),
+    expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    contextSignature: contextBundle.contextSignature,
+    contextSummary: compactText(contextBundle.latestCodexMessage || contextBundle.pendingQuestionOrApproval || contextBundle.userGoal, 260),
+  };
+  return proposal;
+}
+
 function getOrCreateNode(nodeId) {
   const existing = state.nodes.get(nodeId);
   if (existing) return existing;
@@ -1289,6 +1520,38 @@ const server = http.createServer(async (req, res) => {
           persistState();
           sendEvent({ type: "state", state: dashboardState() });
           writeJson(res, 200, { ok: true, unread: unreadNotifications(node).length });
+          return;
+        }
+
+        if (req.method === "POST" && parts[3] === "threads" && parts[4] && parts[5] === "agent-draft") {
+          if (!isAdminAuthed(req, url)) {
+            writeJson(res, 401, { ok: false, error: "Unauthorized" });
+            return;
+          }
+          const threadId = decodeURIComponent(parts[4]);
+          const body = await readBody(req);
+          const thread = (node.threads ?? []).map(normalizeThread).find((item) => item.id === threadId);
+          if (!thread) {
+            writeJson(res, 404, { ok: false, error: "Thread not found" });
+            return;
+          }
+          const contextBundle = buildThreadContextBundle(node, thread);
+          const proposal = buildAgentProposal(contextBundle, body);
+          state.agentProposals.set(proposal.proposalId, proposal);
+          if (state.agentProposals.size > 200) {
+            const oldest = [...state.agentProposals.keys()][0];
+            state.agentProposals.delete(oldest);
+          }
+          recordAudit("agent.proposal.created", "admin", {
+            nodeId,
+            threadId,
+            proposalId: proposal.proposalId,
+            risk: proposal.risk,
+            contextSignature: contextBundle.contextSignature,
+          });
+          persistState();
+          sendEvent({ type: "agentProposalCreated", nodeId, threadId, proposal });
+          writeJson(res, 200, { ok: true, proposal, contextBundle });
           return;
         }
 

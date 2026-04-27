@@ -24,7 +24,7 @@ const (
 	publisher = "Hedatu"
 )
 
-var defaultVersion = "0.4.6"
+var defaultVersion = "0.4.9"
 
 func main() {
 	version := flag.String("version", defaultVersion, "CodexHub Companion version to install")

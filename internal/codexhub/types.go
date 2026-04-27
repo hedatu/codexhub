@@ -48,6 +48,48 @@ type Thread struct {
 	WaitingOnUserInput      bool            `json:"waitingOnUserInput"`
 }
 
+type ThreadContextBundle struct {
+	ThreadID                  string          `json:"threadId"`
+	NodeID                    string          `json:"nodeId"`
+	NodeName                  string          `json:"nodeName,omitempty"`
+	Repo                      string          `json:"repo,omitempty"`
+	CWD                       string          `json:"cwd,omitempty"`
+	Provider                  string          `json:"provider,omitempty"`
+	Status                    string          `json:"status,omitempty"`
+	UserGoal                  string          `json:"userGoal,omitempty"`
+	CurrentPlan               []string        `json:"currentPlan,omitempty"`
+	CompletedWork             []string        `json:"completedWork,omitempty"`
+	FilesMentioned            []string        `json:"filesMentioned,omitempty"`
+	CommandsRun               []string        `json:"commandsRun,omitempty"`
+	Blockers                  []string        `json:"blockers,omitempty"`
+	PendingQuestionOrApproval string          `json:"pendingQuestionOrApproval,omitempty"`
+	LatestCodexMessage        string          `json:"latestCodexMessage,omitempty"`
+	RecentRawMessages         []ThreadMessage `json:"recentRawMessages,omitempty"`
+	RiskFlags                 []string        `json:"riskFlags,omitempty"`
+	SummaryModel              string          `json:"summaryModel"`
+	SummaryUpdatedAt          string          `json:"summaryUpdatedAt"`
+	ContextSignature          string          `json:"contextSignature"`
+}
+
+type AgentProposal struct {
+	ProposalID            string   `json:"proposalId"`
+	ThreadID              string   `json:"threadId"`
+	NodeID                string   `json:"nodeId"`
+	AgentID               string   `json:"agentId"`
+	PolicyID              string   `json:"policyId"`
+	Kind                  string   `json:"kind"`
+	Text                  string   `json:"text"`
+	Risk                  string   `json:"risk"`
+	Confidence            float64  `json:"confidence"`
+	Rationale             string   `json:"rationale"`
+	Boundaries            []string `json:"boundaries"`
+	RequiresHumanApproval bool     `json:"requiresHumanApproval"`
+	CreatedAt             string   `json:"createdAt"`
+	ExpiresAt             string   `json:"expiresAt,omitempty"`
+	ContextSignature      string   `json:"contextSignature,omitempty"`
+	ContextSummary        string   `json:"contextSummary,omitempty"`
+}
+
 type Metrics struct {
 	TotalThreads    int `json:"totalThreads"`
 	Running         int `json:"running"`

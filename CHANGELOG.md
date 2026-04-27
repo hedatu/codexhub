@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.9
+
+- Fixed the TV dashboard queue so unread completion/update notifications from `node.attention` appear in the pending work list.
+- Fixed the modal context button so viewing a thread no longer marks unread notifications as read.
+- Added refresh button in-flight protection and clearer refresh failure feedback.
+- Hardened SSE event handling so malformed events do not break the live dashboard.
+- Synced default release versions across server, agent, companion installer, and packaging scripts.
+- Added Go server coverage for Agent proposal generation guardrails.
+
 ## v0.4.8
 
 - Added bundled Windows `node-runtime\node.exe` support so Farfield can start on Windows agent installs without a separate Node.js installation.

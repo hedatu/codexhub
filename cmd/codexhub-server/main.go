@@ -62,6 +62,8 @@ type appState struct {
 	pushSubscriptions []codexhub.PushSubscription
 	installKey        string
 	clients           map[chan []byte]bool
+	agentSummaries    map[string]codexhub.ThreadContextBundle
+	agentProposals    map[string]codexhub.AgentProposal
 	mu                sync.RWMutex
 }
 
@@ -89,10 +91,12 @@ type server struct {
 func main() {
 	cfg := loadConfig()
 	state := &appState{
-		startedAt:  time.Now().UTC().Format(time.RFC3339),
-		nodes:      map[string]*codexhub.Node{},
-		installKey: cfg.InstallKey,
-		clients:    map[chan []byte]bool{},
+		startedAt:      time.Now().UTC().Format(time.RFC3339),
+		nodes:          map[string]*codexhub.Node{},
+		installKey:     cfg.InstallKey,
+		clients:        map[chan []byte]bool{},
+		agentSummaries: map[string]codexhub.ThreadContextBundle{},
+		agentProposals: map[string]codexhub.AgentProposal{},
 	}
 	s := &server{cfg: cfg, state: state}
 	if err := s.loadState(); err != nil {
@@ -723,6 +727,8 @@ func (s *server) handleNodeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleHeartbeat(w, r, nodeID)
 	case r.Method == http.MethodPost && action == "actions":
 		s.handleQueueAction(w, r, nodeID)
+	case r.Method == http.MethodPost && action == "threads" && len(parts) >= 6 && parts[5] == "agent-draft":
+		s.handleAgentDraft(w, r, nodeID, parts[4])
 	case r.Method == http.MethodPost && action == "notifications" && len(parts) >= 5 && parts[4] == "read":
 		s.handleNotificationsRead(w, r, nodeID)
 	case r.Method == http.MethodGet && action == "commands" && len(parts) >= 5 && parts[4] == "poll":
@@ -916,6 +922,55 @@ func (s *server) handleQueueAction(w http.ResponseWriter, r *http.Request, nodeI
 	s.persistState()
 	s.sendEvent(map[string]any{"type": "commandQueued", "nodeId": nodeID, "command": command})
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "command": command})
+}
+
+func (s *server) handleAgentDraft(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	threadID, err := url.PathUnescape(encodedThreadID)
+	if err != nil {
+		threadID = encodedThreadID
+	}
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	s.state.mu.Lock()
+	node := s.state.nodes[nodeID]
+	if node == nil {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Node not found"))
+		return
+	}
+	thread, ok := findThread(node.Threads, threadID)
+	if !ok {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Thread not found"))
+		return
+	}
+	contextBundle := s.buildThreadContextBundleLocked(node, thread)
+	proposal := buildAgentProposal(contextBundle, body)
+	s.state.agentProposals[proposal.ProposalID] = proposal
+	if len(s.state.agentProposals) > 200 {
+		for key := range s.state.agentProposals {
+			delete(s.state.agentProposals, key)
+			break
+		}
+	}
+	s.recordAuditLocked("agent.proposal.created", "admin", map[string]any{
+		"nodeId":           nodeID,
+		"threadId":         threadID,
+		"proposalId":       proposal.ProposalID,
+		"risk":             proposal.Risk,
+		"contextSignature": contextBundle.ContextSignature,
+	})
+	s.state.mu.Unlock()
+	s.persistState()
+	s.sendEvent(map[string]any{"type": "agentProposalCreated", "nodeId": nodeID, "threadId": threadID, "proposal": proposal})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "proposal": proposal, "contextBundle": contextBundle})
 }
 
 func (s *server) handlePoll(w http.ResponseWriter, r *http.Request, nodeID string) {
@@ -1340,12 +1395,322 @@ func threadActivityMillis(thread codexhub.Thread) int64 {
 	return anyTimeMillis(firstNonZero(thread.LatestFinalMessageAt, thread.LatestProgressMessageAt, thread.LatestMessageAt, thread.UpdatedAt, thread.CreatedAt))
 }
 
+func findThread(threads []codexhub.Thread, threadID string) (codexhub.Thread, bool) {
+	for _, thread := range threads {
+		if thread.ID == threadID {
+			return thread, true
+		}
+	}
+	return codexhub.Thread{}, false
+}
+
+func threadState(thread codexhub.Thread) string {
+	if thread.WaitingOnApproval {
+		return "waiting_approval"
+	}
+	if thread.WaitingOnUserInput {
+		return "waiting_reply"
+	}
+	if thread.IsGenerating {
+		return "running"
+	}
+	if thread.LatestFinalMessage != "" || thread.LatestFinalMessageAt != nil {
+		return "completed"
+	}
+	return "idle"
+}
+
+func threadTitle(thread codexhub.Thread) string {
+	title := strings.TrimSpace(stringValue(thread.Title))
+	if title != "" {
+		return title
+	}
+	preview := compactText(thread.Preview, 80)
+	if preview != "" {
+		return preview
+	}
+	return "未命名 Codex 线程"
+}
+
+func threadRepo(thread codexhub.Thread) string {
+	raw := strings.ReplaceAll(firstNonEmptyString(thread.CWD, thread.Source, thread.Provider, "codex"), "\\", "/")
+	parts := []string{}
+	for _, part := range strings.Split(raw, "/") {
+		if strings.TrimSpace(part) != "" {
+			parts = append(parts, strings.TrimSpace(part))
+		}
+	}
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + " / " + parts[len(parts)-1]
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "codex / workspace"
+}
+
+func compactText(value string, limit int) string {
+	text := strings.Join(strings.Fields(value), " ")
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) > limit {
+		return string(runes[:limit]) + "..."
+	}
+	return text
+}
+
+func appendUniqueLimit(out []string, seen map[string]bool, value string, limit int) []string {
+	value = compactText(value, 180)
+	key := strings.ToLower(value)
+	if value == "" || seen[key] || len(out) >= limit {
+		return out
+	}
+	seen[key] = true
+	return append(out, value)
+}
+
+func splitMeaningfulLines(text string) []string {
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == '。' || r == '；' || r == ';'
+	})
+	lines := []string{}
+	for _, field := range fields {
+		line := strings.Trim(strings.TrimSpace(field), "-*•0123456789.、 ")
+		if len([]rune(line)) >= 6 {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func recentRawMessages(thread codexhub.Thread, limit int) []codexhub.ThreadMessage {
+	messages := []codexhub.ThreadMessage{}
+	start := 0
+	if len(thread.RecentMessages) > limit {
+		start = len(thread.RecentMessages) - limit
+	}
+	for _, message := range thread.RecentMessages[start:] {
+		if strings.TrimSpace(message.Text) == "" {
+			continue
+		}
+		message.Text = compactText(message.Text, 900)
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func contextSignature(node *codexhub.Node, thread codexhub.Thread) string {
+	hash := sha256.New()
+	_, _ = fmt.Fprintf(hash, "%s|%s|%v|%v|%v|%v", node.ID, thread.ID, thread.UpdatedAt, thread.LatestMessageAt, thread.LatestFinalMessageAt, thread.LatestProgressMessageAt)
+	for _, message := range thread.RecentMessages {
+		_, _ = fmt.Fprintf(hash, "|%v|%s|%s", message.At, message.Phase, compactText(message.Text, 300))
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))[:20]
+}
+
+func extractFiles(text string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, field := range strings.Fields(text) {
+		value := strings.Trim(field, " ,，:：;；()[]{}<>\"'")
+		normalized := strings.ReplaceAll(value, "\\", "/")
+		if strings.Contains(normalized, "/") && strings.Contains(filepath.Base(normalized), ".") {
+			out = appendUniqueLimit(out, seen, normalized, 8)
+		}
+	}
+	return out
+}
+
+func extractCommands(lines []string) []string {
+	needles := []string{"npm", "pnpm", "yarn", "node", "go ", "git ", "python", "pytest", "powershell", "curl", "docker", "kubectl", "sqlite3"}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		for _, needle := range needles {
+			if strings.Contains(lower, needle) {
+				out = appendUniqueLimit(out, seen, line, 8)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func extractRiskFlags(text string) []string {
+	checks := [][2]string{
+		{"deploy", "部署"},
+		{"production", "生产环境"},
+		{"prod", "生产环境"},
+		{"delete", "删除"},
+		{"rm -rf", "递归删除"},
+		{"git push", "git push"},
+		{"secret", "密钥"},
+		{"token", "令牌"},
+		{"database", "数据库"},
+		{"payment", "支付链路"},
+		{"permission", "权限策略"},
+		{"k8s", "集群变更"},
+		{"kubectl", "集群命令"},
+		{"失败", "失败状态"},
+		{"高风险", "高风险请求"},
+	}
+	lower := strings.ToLower(text)
+	seen := map[string]bool{}
+	out := []string{}
+	for _, check := range checks {
+		if strings.Contains(lower, check[0]) {
+			out = appendUniqueLimit(out, seen, check[1], 8)
+		}
+	}
+	return out
+}
+
+func (s *server) buildThreadContextBundleLocked(node *codexhub.Node, thread codexhub.Thread) codexhub.ThreadContextBundle {
+	signature := contextSignature(node, thread)
+	cacheKey := node.ID + ":" + thread.ID
+	if cached, ok := s.state.agentSummaries[cacheKey]; ok && cached.ContextSignature == signature {
+		return cached
+	}
+	latest := firstNonEmptyString(thread.LatestMessage, thread.LatestProgressMessage, thread.LatestFinalMessage, thread.Preview)
+	rawMessages := recentRawMessages(thread, 6)
+	parts := []string{stringValue(thread.Title), thread.Preview, thread.LatestMessage, thread.LatestProgressMessage, thread.LatestFinalMessage}
+	for _, message := range rawMessages {
+		parts = append(parts, message.Text)
+	}
+	joined := strings.Join(parts, "\n")
+	lines := splitMeaningfulLines(joined)
+	currentPlan, completedWork, blockers := []string{}, []string{}, []string{}
+	seenPlan, seenDone, seenBlockers := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(line, "计划") || strings.Contains(line, "下一步") || strings.Contains(line, "需要") || strings.Contains(line, "建议") || strings.Contains(lower, "todo") || strings.Contains(lower, "next") || strings.Contains(lower, "plan") || strings.Contains(lower, "will") || strings.Contains(lower, "should") {
+			currentPlan = appendUniqueLimit(currentPlan, seenPlan, line, 6)
+		}
+		if strings.Contains(line, "已") || strings.Contains(line, "完成") || strings.Contains(line, "实现") || strings.Contains(line, "修复") || strings.Contains(line, "新增") || strings.Contains(line, "更新") || strings.Contains(lower, "done") || strings.Contains(lower, "implemented") || strings.Contains(lower, "fixed") || strings.Contains(lower, "added") || strings.Contains(lower, "updated") {
+			completedWork = appendUniqueLimit(completedWork, seenDone, line, 6)
+		}
+		if strings.Contains(line, "失败") || strings.Contains(line, "错误") || strings.Contains(line, "阻塞") || strings.Contains(line, "等待") || strings.Contains(line, "需要你") || strings.Contains(line, "审批") || strings.Contains(line, "确认") || strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "blocked") || strings.Contains(lower, "waiting") || strings.Contains(lower, "approval") || strings.Contains(lower, "confirm") {
+			blockers = appendUniqueLimit(blockers, seenBlockers, line, 6)
+		}
+	}
+	pending := ""
+	if thread.WaitingOnApproval {
+		pending = "Codex 正在等待审批。"
+	} else if thread.WaitingOnUserInput {
+		pending = "Codex 正在等待用户回复。"
+	} else if len(blockers) > 0 {
+		pending = blockers[0]
+	}
+	bundle := codexhub.ThreadContextBundle{
+		ThreadID:                  thread.ID,
+		NodeID:                    node.ID,
+		NodeName:                  firstNonEmptyString(node.Name, node.ID),
+		Repo:                      threadRepo(thread),
+		CWD:                       thread.CWD,
+		Provider:                  firstNonEmptyString(thread.Provider, "codex"),
+		Status:                    threadState(thread),
+		UserGoal:                  compactText(threadTitle(thread), 160),
+		CurrentPlan:               currentPlan,
+		CompletedWork:             completedWork,
+		FilesMentioned:            extractFiles(joined),
+		CommandsRun:               extractCommands(lines),
+		Blockers:                  blockers,
+		PendingQuestionOrApproval: compactText(firstNonEmptyString(pending, latest), 240),
+		LatestCodexMessage:        compactText(latest, 900),
+		RecentRawMessages:         rawMessages,
+		RiskFlags:                 extractRiskFlags(joined),
+		SummaryModel:              "codexhub-extractive-v1",
+		SummaryUpdatedAt:          nowISO(),
+		ContextSignature:          signature,
+	}
+	s.state.agentSummaries[cacheKey] = bundle
+	if len(s.state.agentSummaries) > 500 {
+		for key := range s.state.agentSummaries {
+			delete(s.state.agentSummaries, key)
+			break
+		}
+	}
+	return bundle
+}
+
+func proposalRisk(bundle codexhub.ThreadContextBundle) string {
+	for _, flag := range bundle.RiskFlags {
+		if strings.Contains(flag, "生产") || strings.Contains(flag, "删除") || strings.Contains(flag, "push") || strings.Contains(flag, "密钥") || strings.Contains(flag, "数据库") || strings.Contains(flag, "支付") || strings.Contains(flag, "集群") || strings.Contains(flag, "高风险") || strings.Contains(flag, "失败") {
+			return "high"
+		}
+	}
+	if bundle.Status == "waiting_approval" || bundle.Status == "waiting_reply" {
+		return "medium"
+	}
+	return "low"
+}
+
+func buildProposalText(bundle codexhub.ThreadContextBundle, body map[string]any) string {
+	intent := stringValue(body["intent"])
+	if bundle.Status == "waiting_approval" || intent == "approve" {
+		return strings.Join([]string{
+			fmt.Sprintf("建议先不要直接放行高风险动作。请 Codex 基于「%s」补充：", bundle.UserGoal),
+			"1. 将要执行的具体命令或变更范围。",
+			"2. 影响面、回滚方式和验证命令。",
+			"3. 明确避开 deploy、git push、delete、secret access、database mutation。",
+			"如果确认只是低风险代码或文档改动，再由人类批准继续。",
+		}, "\n")
+	}
+	if bundle.Status == "waiting_reply" {
+		return strings.Join([]string{
+			fmt.Sprintf("请继续处理「%s」。", bundle.UserGoal),
+			"优先给出最小可验证实现；完成后汇报修改文件、验证命令、剩余风险。",
+			"不要部署、推送、删除文件或访问密钥；遇到这些动作必须再次请求人工确认。",
+		}, "\n")
+	}
+	return strings.Join([]string{
+		fmt.Sprintf("请基于当前上下文继续推进「%s」。", bundle.UserGoal),
+		"保持改动最小，先验证再继续；如遇高风险动作，停止并请求人工审批。",
+	}, "\n")
+}
+
+func buildAgentProposal(bundle codexhub.ThreadContextBundle, body map[string]any) codexhub.AgentProposal {
+	risk := proposalRisk(bundle)
+	confidence := 0.84
+	if risk == "high" {
+		confidence = 0.72
+	}
+	rationaleParts := []string{"基于压缩后的 ThreadContextBundle 生成。"}
+	if len(bundle.RiskFlags) > 0 {
+		rationaleParts = append(rationaleParts, "风险信号："+strings.Join(bundle.RiskFlags, "、")+"。")
+	} else {
+		rationaleParts = append(rationaleParts, "未发现明显高风险信号。")
+	}
+	rationaleParts = append(rationaleParts, "该 proposal 只供人工审核，不会自动写入 Codex。")
+	return codexhub.AgentProposal{
+		ProposalID:            uuid(),
+		ThreadID:              bundle.ThreadID,
+		NodeID:                bundle.NodeID,
+		AgentID:               "codexhub-agent-proposal-v1",
+		PolicyID:              "human-approved-proposal-v1",
+		Kind:                  firstNonEmptyString(stringValue(body["kind"]), "reply"),
+		Text:                  buildProposalText(bundle, body),
+		Risk:                  risk,
+		Confidence:            confidence,
+		Rationale:             strings.Join(rationaleParts, " "),
+		Boundaries:            []string{"Agent 只能生成 proposal", "人类批准后才下发 action", "禁止 deploy / git push / delete", "禁止 secret access / database mutation", "高风险动作必须二次确认"},
+		RequiresHumanApproval: true,
+		CreatedAt:             nowISO(),
+		ExpiresAt:             time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339),
+		ContextSignature:      bundle.ContextSignature,
+		ContextSummary:        compactText(firstNonEmptyString(bundle.LatestCodexMessage, bundle.PendingQuestionOrApproval, bundle.UserGoal), 260),
+	}
+}
+
 func (s *server) installProfile(r *http.Request) map[string]any {
 	base := s.publicBaseURL(r)
 	installKey := s.currentInstallKey()
 	releaseVersion := env("CODEXHUB_VERSION", version)
 	if releaseVersion == "dev" || releaseVersion == "" {
-		releaseVersion = "0.4.5"
+		releaseVersion = "0.4.9"
 	}
 	downloads := map[string]string{
 		"androidApk":         fmt.Sprintf("%s/downloads/codexhub-android-v%s.apk", base, releaseVersion),
