@@ -539,9 +539,19 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 			node.Commands[i].CompletedAt = nowISO()
 			node.Commands[i].Result = body
 			cmd := node.Commands[i]
+			if cmd.Status == "failed" && stringValue(cmd.Action["threadId"]) != "" {
+				addNodeNotificationLocked(node, codexhub.Notification{
+					Type:            "commandFailed",
+					ThreadID:        stringValue(cmd.Action["threadId"]),
+					ThreadUpdatedAt: cmd.CompletedAt,
+					Title:           "手机指令发送失败",
+					Preview:         firstNonEmptyString(stringValue(body["error"]), stringValue(mapValue(body["result"])["error"]), "桌面端执行手机指令失败，请检查本机状态。"),
+				})
+			}
 			s.recordAuditLocked("command.completed", "node", map[string]any{"nodeId": nodeID, "commandId": commandID, "status": cmd.Status})
 			s.state.mu.Unlock()
 			s.persistState()
+			s.sendEvent(map[string]any{"type": "state", "state": s.dashboardState()})
 			s.sendEvent(map[string]any{"type": "commandResult", "nodeId": nodeID, "command": cmd})
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "command": cmd})
 			return
@@ -644,6 +654,7 @@ func (s *server) publicNodeLocked(node *codexhub.Node) map[string]any {
 			"latestFinalMessageAt":    map[bool]any{true: n.CreatedAt, false: nil}[n.Type == "completed"],
 			"latestProgressMessage":   map[bool]string{true: "", false: n.Preview}[n.Type == "completed"],
 			"latestProgressMessageAt": map[bool]any{true: nil, false: n.CreatedAt}[n.Type == "completed"],
+			"recentMessages":          []codexhub.ThreadMessage{{Text: n.Preview, At: n.CreatedAt, Phase: n.Type}},
 			"isGenerating":            false,
 			"waitingOnApproval":       false,
 			"waitingOnUserInput":      false,
@@ -1189,12 +1200,44 @@ func normalizeThreads(value any) []codexhub.Thread {
 			LatestFinalMessageAt:    row["latestFinalMessageAt"],
 			LatestProgressMessage:   stringValue(row["latestProgressMessage"]),
 			LatestProgressMessageAt: row["latestProgressMessageAt"],
+			RecentMessages:          normalizeRecentMessages(row["recentMessages"]),
 			IsGenerating:            boolValue(row["isGenerating"]),
 			WaitingOnApproval:       boolValue(row["waitingOnApproval"]),
 			WaitingOnUserInput:      boolValue(row["waitingOnUserInput"]),
 		})
 	}
 	return threads
+}
+
+func normalizeRecentMessages(value any) []codexhub.ThreadMessage {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	start := 0
+	if len(items) > 6 {
+		start = len(items) - 6
+	}
+	messages := []codexhub.ThreadMessage{}
+	for _, item := range items[start:] {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		text := stringValue(row["text"])
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if len([]rune(text)) > 1800 {
+			text = string([]rune(text)[:1800]) + "..."
+		}
+		messages = append(messages, codexhub.ThreadMessage{
+			Text:  text,
+			At:    row["at"],
+			Phase: stringValue(row["phase"]),
+		})
+	}
+	return messages
 }
 
 func updateThreadNotificationsLocked(node *codexhub.Node, previousThreads []codexhub.Thread, nextThreads []codexhub.Thread, previousLastSeenAt string) {

@@ -19,25 +19,32 @@ type FarfieldState struct {
 	GitCommit      string `json:"gitCommit,omitempty"`
 }
 
+type ThreadMessage struct {
+	Text  string `json:"text,omitempty"`
+	At    any    `json:"at,omitempty"`
+	Phase string `json:"phase,omitempty"`
+}
+
 type Thread struct {
-	ID                      string `json:"id"`
-	Provider                string `json:"provider,omitempty"`
-	Title                   any    `json:"title,omitempty"`
-	Preview                 string `json:"preview,omitempty"`
-	CWD                     string `json:"cwd,omitempty"`
-	Source                  string `json:"source,omitempty"`
-	CreatedAt               any    `json:"createdAt,omitempty"`
-	UpdatedAt               any    `json:"updatedAt,omitempty"`
-	LatestMessage           string `json:"latestMessage,omitempty"`
-	LatestMessageAt         any    `json:"latestMessageAt,omitempty"`
-	LatestMessagePhase      string `json:"latestMessagePhase,omitempty"`
-	LatestFinalMessage      string `json:"latestFinalMessage,omitempty"`
-	LatestFinalMessageAt    any    `json:"latestFinalMessageAt,omitempty"`
-	LatestProgressMessage   string `json:"latestProgressMessage,omitempty"`
-	LatestProgressMessageAt any    `json:"latestProgressMessageAt,omitempty"`
-	IsGenerating            bool   `json:"isGenerating"`
-	WaitingOnApproval       bool   `json:"waitingOnApproval"`
-	WaitingOnUserInput      bool   `json:"waitingOnUserInput"`
+	ID                      string          `json:"id"`
+	Provider                string          `json:"provider,omitempty"`
+	Title                   any             `json:"title,omitempty"`
+	Preview                 string          `json:"preview,omitempty"`
+	CWD                     string          `json:"cwd,omitempty"`
+	Source                  string          `json:"source,omitempty"`
+	CreatedAt               any             `json:"createdAt,omitempty"`
+	UpdatedAt               any             `json:"updatedAt,omitempty"`
+	LatestMessage           string          `json:"latestMessage,omitempty"`
+	LatestMessageAt         any             `json:"latestMessageAt,omitempty"`
+	LatestMessagePhase      string          `json:"latestMessagePhase,omitempty"`
+	LatestFinalMessage      string          `json:"latestFinalMessage,omitempty"`
+	LatestFinalMessageAt    any             `json:"latestFinalMessageAt,omitempty"`
+	LatestProgressMessage   string          `json:"latestProgressMessage,omitempty"`
+	LatestProgressMessageAt any             `json:"latestProgressMessageAt,omitempty"`
+	RecentMessages          []ThreadMessage `json:"recentMessages,omitempty"`
+	IsGenerating            bool            `json:"isGenerating"`
+	WaitingOnApproval       bool            `json:"waitingOnApproval"`
+	WaitingOnUserInput      bool            `json:"waitingOnUserInput"`
 }
 
 type Metrics struct {

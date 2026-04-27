@@ -360,6 +360,7 @@ func normalizeThreads(sidebar map[string]any, health map[string]any, provider st
 			LatestFinalMessageAt:    latest.LatestFinalMessageAt,
 			LatestProgressMessage:   latest.LatestProgressMessage,
 			LatestProgressMessageAt: latest.LatestProgressMessageAt,
+			RecentMessages:          latest.RecentMessages,
 			IsGenerating:            isGenerating,
 			WaitingOnApproval:       boolValue(row["waitingOnApproval"]),
 			WaitingOnUserInput:      boolValue(row["waitingOnUserInput"]),
@@ -433,6 +434,7 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
 	var latestFinal *sessionMessage
 	var latestProgress *sessionMessage
+	recentMessages := []codexhub.ThreadMessage{}
 	for index := len(lines) - 1; index >= 0; index-- {
 		line := strings.TrimSpace(lines[index])
 		if line == "" {
@@ -457,12 +459,15 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 			At:    event["timestamp"],
 			Phase: stringValue(payload["phase"]),
 		}
+		if len(recentMessages) < 6 {
+			recentMessages = append(recentMessages, codexhub.ThreadMessage{Text: entry.Text, At: entry.At, Phase: entry.Phase})
+		}
 		if latestFinal == nil && entry.Phase == "final_answer" {
 			latestFinal = entry
 		} else if latestProgress == nil && entry.Phase != "final_answer" {
 			latestProgress = entry
 		}
-		if latestFinal != nil && latestProgress != nil {
+		if latestFinal != nil && latestProgress != nil && len(recentMessages) >= 6 {
 			break
 		}
 	}
@@ -477,6 +482,7 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 		LatestMessage:      preferred.Text,
 		LatestMessageAt:    preferred.At,
 		LatestMessagePhase: preferred.Phase,
+		RecentMessages:     reverseThreadMessages(recentMessages),
 	}
 	if latestFinal != nil {
 		thread.LatestFinalMessage = latestFinal.Text
@@ -487,6 +493,14 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 		thread.LatestProgressMessageAt = latestProgress.At
 	}
 	return thread
+}
+
+func reverseThreadMessages(messages []codexhub.ThreadMessage) []codexhub.ThreadMessage {
+	out := append([]codexhub.ThreadMessage(nil), messages...)
+	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
+		out[left], out[right] = out[right], out[left]
+	}
+	return out
 }
 
 func extractSessionMessageText(payload map[string]any) string {

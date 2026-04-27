@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.2
+
+- Added a task delivery timeline to show cloud queue, desktop pickup, Codex forwarding, and reply status.
+- Added recent Codex session messages to task details for better mobile-side context.
+- Added unread notifications for failed mobile-to-desktop commands.
+- Added node search and extra filters for running nodes, sync warnings, and sync errors.
+- Bumped the web cache to `codexhub-v18`.
+
 ## v0.4.0
 
 - Added a native Go CodexHub server that serves the existing web console and implements the enrollment, dashboard, audit, SSE, heartbeat, and command queue APIs.

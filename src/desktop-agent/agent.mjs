@@ -238,6 +238,7 @@ function readLatestSessionMessage(threadId) {
   if (cached && cached.mtimeMs === stat.mtimeMs) return cached.value;
   let latestFinal = null;
   let latestProgress = null;
+  const recentMessages = [];
   try {
     const lines = fs.readFileSync(filePath, "utf8").trimEnd().split(/\r?\n/);
     for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -256,16 +257,18 @@ function readLatestSessionMessage(threadId) {
         at: event.timestamp ?? null,
         phase,
       };
+      if (recentMessages.length < 6) recentMessages.push(entry);
       if (!latestFinal && phase === "final_answer") {
         latestFinal = entry;
       } else if (!latestProgress && phase !== "final_answer") {
         latestProgress = entry;
       }
-      if (latestFinal && latestProgress) break;
+      if (latestFinal && latestProgress && recentMessages.length >= 6) break;
     }
   } catch {
     latestFinal = null;
     latestProgress = null;
+    recentMessages.length = 0;
   }
   const preferred = latestFinal ?? latestProgress;
   const value = preferred ? {
@@ -276,6 +279,7 @@ function readLatestSessionMessage(threadId) {
     latestFinalMessageAt: latestFinal?.at ?? null,
     latestProgressMessage: latestProgress?.text ?? null,
     latestProgressMessageAt: latestProgress?.at ?? null,
+    recentMessages: recentMessages.reverse(),
   } : {};
   SESSION_CACHE.set(filePath, { mtimeMs: stat.mtimeMs, value });
   return value;

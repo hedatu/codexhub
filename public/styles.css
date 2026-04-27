@@ -416,6 +416,15 @@ textarea:focus {
   margin: -2px 0 12px;
 }
 
+.node-toolbar {
+  margin: -4px 0 12px;
+}
+
+.node-toolbar input {
+  min-height: 40px;
+  border-radius: 12px;
+}
+
 .segmented {
   display: inline-flex;
   gap: 4px;
@@ -708,6 +717,23 @@ textarea:focus {
   overflow: hidden;
 }
 
+.node-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.node-sync-line > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .node-stats span {
   display: inline-flex;
   align-items: center;
@@ -931,6 +957,92 @@ textarea:focus {
   background: rgba(243, 245, 248, 0.72);
   border-radius: 16px;
   padding: 14px;
+}
+
+.sync-timeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.timeline-step {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(243, 245, 248, 0.72);
+}
+
+.timeline-step i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #a5adb8;
+}
+
+.timeline-step.done i {
+  background: var(--green);
+}
+
+.timeline-step.warn i {
+  background: var(--amber);
+}
+
+.timeline-step strong,
+.timeline-step span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-step strong {
+  font-size: 12px;
+}
+
+.timeline-step span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.message-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.message-list .section-head {
+  margin: 4px 0 0;
+}
+
+.message-bubble {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(243, 245, 248, 0.72);
+}
+
+.message-bubble.final {
+  background: rgba(215, 233, 251, 0.58);
+}
+
+.message-bubble span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.message-bubble p {
+  margin: 5px 0 0;
+  color: #2f3943;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .latest-progress {
@@ -1430,6 +1542,10 @@ textarea:focus {
   }
 
   .diagnostic-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-timeline {
     grid-template-columns: 1fr;
   }
 }

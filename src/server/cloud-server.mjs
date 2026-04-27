@@ -333,10 +333,20 @@ function normalizeThread(thread) {
     latestFinalMessageAt: thread.latestFinalMessageAt ?? null,
     latestProgressMessage: thread.latestProgressMessage ?? null,
     latestProgressMessageAt: thread.latestProgressMessageAt ?? null,
+    recentMessages: normalizeRecentMessages(thread.recentMessages),
     isGenerating: Boolean(thread.isGenerating),
     waitingOnApproval: Boolean(thread.waitingOnApproval),
     waitingOnUserInput: Boolean(thread.waitingOnUserInput),
   };
+}
+
+function normalizeRecentMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages.slice(-6).map((message) => ({
+    text: String(message?.text ?? "").slice(0, 1800),
+    at: message?.at ?? null,
+    phase: message?.phase ?? null,
+  })).filter((message) => message.text.trim());
 }
 
 function notificationTitle(thread) {
@@ -446,6 +456,7 @@ function publicNode(node) {
     latestFinalMessageAt: notice.type === "completed" ? notice.createdAt : null,
     latestProgressMessage: notice.type !== "completed" ? notice.preview : null,
     latestProgressMessageAt: notice.type !== "completed" ? notice.createdAt : null,
+    recentMessages: notice.preview ? [{ text: notice.preview, at: notice.createdAt, phase: notice.type }] : [],
     isGenerating: false,
     waitingOnApproval: false,
     waitingOnUserInput: false,
@@ -864,8 +875,18 @@ const server = http.createServer(async (req, res) => {
           command.status = body.ok ? "done" : "failed";
           command.completedAt = nowIso();
           command.result = body;
+          if (command.status === "failed" && command.action?.threadId) {
+            addNodeNotification(node, {
+              type: "commandFailed",
+              threadId: String(command.action.threadId),
+              threadUpdatedAt: command.completedAt,
+              title: "手机指令发送失败",
+              preview: body.error || body.result?.error || "桌面端执行手机指令失败，请检查本机状态。",
+            });
+          }
           recordAudit("command.completed", "node", { nodeId, commandId: command.id, status: command.status });
           persistState();
+          sendEvent({ type: "state", state: dashboardState() });
           sendEvent({ type: "commandResult", nodeId, command });
           writeJson(res, 200, { ok: true, command });
           return;

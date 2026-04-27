@@ -29,6 +29,7 @@ const dom = {
   nodeList: document.querySelector("#nodeList"),
   nodeRange: document.querySelector("#nodeRange"),
   statusFilter: document.querySelector("#statusFilter"),
+  nodeSearchInput: document.querySelector("#nodeSearchInput"),
   detailPane: document.querySelector("#detailPane"),
   closeDetailBtn: document.querySelector("#closeDetailBtn"),
   detailContent: document.querySelector("#detailContent"),
@@ -46,6 +47,7 @@ const state = {
   refreshTimer: null,
   view: "overview",
   inboxFilter: "unread",
+  nodeQuery: "",
   replyDrafts: new Map(),
 };
 
@@ -139,6 +141,7 @@ function statusLabel(node) {
 function threadStatus(thread) {
   if (thread.attentionKind === "completed") return { className: "waiting", text: "任务完成" };
   if (thread.attentionKind === "updated") return { className: "waiting", text: thread.readAt ? "已读" : "未读" };
+  if (thread.attentionKind === "commandFailed") return { className: "approval", text: "发送失败" };
   if (thread.waitingOnApproval) return { className: "approval", text: "待审批" };
   if (thread.waitingOnUserInput) return { className: "waiting", text: "等待回复" };
   if (thread.isGenerating) return { className: "running", text: "运行中" };
@@ -166,6 +169,18 @@ function threadSummary(thread) {
 
 function threadActivityTime(thread) {
   return toMillis(thread.latestFinalMessageAt || thread.latestProgressMessageAt || thread.latestMessageAt || thread.updatedAt || thread.createdAt);
+}
+
+function nodeSearchText(node) {
+  return [
+    node.id,
+    node.name,
+    node.host?.hostname,
+    node.host?.platform,
+    node.host?.arch,
+    ...(node.tags ?? []),
+    ...(node.threads ?? []).slice(0, 8).flatMap((thread) => [threadTitle(thread), threadSummary(thread), thread.cwd, thread.source]),
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function syncLabel(stateName) {
@@ -244,6 +259,61 @@ function renderCommandNotice(node, thread) {
         ${steps.map(([text, done]) => `<span class="${done ? "done" : ""}">${done ? "✓" : "·"} ${escapeHtml(text)}</span>`).join("")}
       </div>
       <span>${escapeHtml(`${latest.action?.kind ?? "command"}${sentText}`)}</span>
+    </div>
+  `;
+}
+
+function renderThreadTimeline(node, thread) {
+  const latest = commandsForThread(node, thread.id).at(-1);
+  const commandQueuedAt = latest ? toMillis(latest.createdAt) : 0;
+  const commandLeasedAt = latest ? toMillis(latest.leasedAt) : 0;
+  const commandCompletedAt = latest ? toMillis(latest.completedAt) : 0;
+  const latestMessageAt = toMillis(thread.latestMessageAt || thread.latestProgressMessageAt || thread.latestFinalMessageAt || thread.updatedAt);
+  const hasReplyAfterCommand = latest ? latest.status === "done" && latestMessageAt > commandCompletedAt : latestMessageAt > 0;
+  const steps = [
+    { label: "云端已记录", at: thread.updatedAt || thread.createdAt, done: true },
+    { label: "手机指令排队", at: latest?.createdAt, done: Boolean(commandQueuedAt), warn: latest?.status === "failed" },
+    { label: "桌面端接收", at: latest?.leasedAt, done: Boolean(commandLeasedAt || commandCompletedAt), warn: latest?.status === "failed" },
+    { label: "转发给 Codex", at: latest?.completedAt, done: latest?.status === "done", warn: latest?.status === "failed" },
+    {
+      label: thread.isGenerating ? "Codex 运行中" : hasReplyAfterCommand ? "Codex 已回复" : "等待新内容",
+      at: thread.latestMessageAt || thread.latestProgressMessageAt || thread.latestFinalMessageAt,
+      done: Boolean(hasReplyAfterCommand || thread.isGenerating || !latest),
+      warn: Boolean(latest && latest.status === "done" && !hasReplyAfterCommand),
+    },
+  ];
+  return `
+    <div class="sync-timeline">
+      ${steps.map((step) => `
+        <div class="timeline-step ${step.done ? "done" : ""} ${step.warn ? "warn" : ""}">
+          <i></i>
+          <div>
+            <strong>${escapeHtml(step.label)}</strong>
+            <span>${step.at ? timeAgo(step.at) : "待发生"}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderRecentMessages(thread) {
+  const messages = Array.isArray(thread.recentMessages) ? thread.recentMessages.filter((message) => String(message.text || "").trim()) : [];
+  if (messages.length === 0) return "";
+  return `
+    <div class="message-list">
+      <div class="section-head compact">
+        <div>
+          <h3>最近消息</h3>
+          <p>来自本地 Codex 会话文件的最新输出</p>
+        </div>
+      </div>
+      ${messages.map((message) => `
+        <article class="message-bubble ${message.phase === "final_answer" ? "final" : "progress"}">
+          <span>${escapeHtml(message.phase === "final_answer" ? "最终回复" : "过程消息")} · ${timeAgo(message.at)}</span>
+          <p>${escapeHtml(message.text)}</p>
+        </article>
+      `).join("")}
     </div>
   `;
 }
@@ -406,10 +476,17 @@ function renderAttention(nodes) {
 
 function renderNodes(nodes) {
   const filter = dom.statusFilter.value;
+  const query = state.nodeQuery.trim().toLowerCase();
   const filtered = nodes.filter((node) => {
-    if (filter === "all") return true;
-    if (filter === "attention") return node.metrics.attention > 0;
-    return node.status === filter;
+    const matchesFilter = (() => {
+      if (filter === "all") return true;
+      if (filter === "attention") return node.metrics.attention > 0;
+      if (filter === "running") return node.metrics.running > 0;
+      if (filter === "warning") return node.syncHealth?.overall === "warning";
+      if (filter === "danger") return node.syncHealth?.overall === "danger";
+      return node.status === filter;
+    })();
+    return matchesFilter && (!query || nodeSearchText(node).includes(query));
   });
 
   if (filtered.length === 0) {
@@ -419,6 +496,7 @@ function renderNodes(nodes) {
 
   dom.nodeList.innerHTML = filtered.map((node) => {
     const status = statusLabel(node);
+    const sync = syncLabel(node.syncHealth?.overall);
     return `
       <article class="node-card" data-node="${escapeHtml(node.id)}">
         <div class="node-top">
@@ -427,6 +505,10 @@ function renderNodes(nodes) {
             <span>${escapeHtml(node.host?.hostname ?? node.id)} · ${timeAgo(node.lastSeenAt)}</span>
           </div>
           <span class="status-chip ${status.className}">${status.text}</span>
+        </div>
+        <div class="node-sync-line">
+          <span class="status-chip ${sync.className}">同步${sync.text}</span>
+          <span>${escapeHtml(node.syncHealth?.checks?.find((check) => check.state !== "ok")?.detail || "同步链路正常")}</span>
         </div>
         <div class="node-stats">
           <span>运行中 <strong>${node.metrics.running}</strong></span>
@@ -533,7 +615,9 @@ function renderDetail() {
     dom.detailContent.innerHTML = `<p class="empty-detail">选择一个节点或任务查看详情。</p>`;
     return;
   }
-  const selectedThread = node.threads.find((thread) => thread.id === state.selectedThreadId) ?? null;
+  const selectedThread = node.threads.find((thread) => thread.id === state.selectedThreadId)
+    ?? (node.attention ?? []).find((thread) => thread.id === state.selectedThreadId)
+    ?? null;
   const status = statusLabel(node);
   dom.detailContent.innerHTML = `
     <div class="detail-hero">
@@ -636,12 +720,14 @@ function renderThreadDetail(node, thread) {
   const latestAt = finalMessage ? thread.latestFinalMessageAt : progressMessage ? thread.latestProgressMessageAt : (thread.latestMessageAt || thread.updatedAt);
   const summary = threadSummary(thread);
   return `
+    ${renderThreadTimeline(node, thread)}
     ${latest ? `
       <div class="latest-progress">
         <span>${latestLabel} · ${timeAgo(latestAt)}</span>
         <p>${escapeHtml(latest)}</p>
       </div>
     ` : ""}
+    ${renderRecentMessages(thread)}
     <div class="thread-detail-body">
       <span>任务摘要</span>
       <p>${escapeHtml(summary)}</p>
@@ -841,6 +927,10 @@ dom.settingsBtn.addEventListener("click", () => {
 
 dom.refreshBtn.addEventListener("click", requestDesktopRefresh);
 dom.statusFilter.addEventListener("change", render);
+dom.nodeSearchInput?.addEventListener("input", () => {
+  state.nodeQuery = dom.nodeSearchInput.value || "";
+  renderNodes(state.dashboard?.nodes ?? []);
+});
 dom.closeDetailBtn.addEventListener("click", () => dom.detailPane.classList.remove("open"));
 dom.markAllReadBtn?.addEventListener("click", markAllNotificationsRead);
 dom.rotateInstallKeyBtn?.addEventListener("click", async () => {
