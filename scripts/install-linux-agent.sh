@@ -47,6 +47,17 @@ case "$ARCH" in
 esac
 
 mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR"
+cat > "$INSTALL_DIR/install-preflight.json" <<EOF_PREFLIGHT
+{
+  "os": "linux",
+  "user": "$USER",
+  "node": "$(command -v node || true)",
+  "npx": "$(command -v npx || true)",
+  "codex": "$(command -v codex || true)",
+  "systemctl": "$(command -v systemctl || true)",
+  "checkedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF_PREFLIGHT
 AGENT_BIN=""
 if [ -n "$GO_ARCH" ] && [ -f "$REPO_ROOT/bin/codexhub-agent-linux-$GO_ARCH" ]; then
   AGENT_BIN="$INSTALL_DIR/bin/codexhub-agent"

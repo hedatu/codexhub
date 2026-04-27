@@ -142,6 +142,18 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -419,6 +431,10 @@ func (s *server) handleHeartbeat(w http.ResponseWriter, r *http.Request, nodeID 
 		node.Tags = stringSlice(tags)
 	}
 	node.Version = body["version"]
+	node.HeartbeatSeq = body["heartbeatSeq"]
+	node.CollectedAt = body["collectedAt"]
+	node.AgentStartedAt = body["agentStartedAt"]
+	node.Update = body["update"]
 	node.Host = body["host"]
 	previousLastSeenAt := node.LastSeenAt
 	node.LastSeenAt = nowISO()
@@ -631,7 +647,24 @@ func (s *server) dashboardState() map[string]any {
 		}
 	}
 	totals["offline"] = totals["nodes"] - totals["online"]
-	return map[string]any{"ok": true, "generatedAt": nowISO(), "startedAt": startedAt, "totals": totals, "nodes": nodes}
+	reportOffset := envInt("CODEXHUB_REPORT_TZ_OFFSET_MINUTES", 480)
+	reportLocation := time.FixedZone("CodexHubReport", reportOffset*60)
+	now := time.Now().In(reportLocation)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, reportLocation)
+	for _, node := range nodes {
+		threads, _ := node["threads"].([]codexhub.Thread)
+		for _, thread := range threads {
+			at := firstNonZero(thread.LatestFinalMessageAt, thread.LatestMessageAt, thread.UpdatedAt, thread.CreatedAt)
+			if anyTimeMillis(at) >= todayStart.UnixMilli() {
+				totals["updatedToday"]++
+			}
+			if thread.LatestFinalMessage != "" && anyTimeMillis(firstNonZero(thread.LatestFinalMessageAt, thread.UpdatedAt)) >= todayStart.UnixMilli() {
+				totals["completedToday"]++
+			}
+		}
+	}
+	report := map[string]any{"date": todayStart.Format("2006-01-02"), "timezoneOffsetMinutes": reportOffset, "updatedThreads": totals["updatedToday"], "completedThreads": totals["completedToday"], "failedCommands": totals["failedCommands"], "onlineNodes": totals["online"], "totalNodes": totals["nodes"]}
+	return map[string]any{"ok": true, "version": env("CODEXHUB_VERSION", version), "generatedAt": nowISO(), "startedAt": startedAt, "storage": map[string]any{"driver": env("CODEXHUB_STORAGE", "json"), "sqliteNote": "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite during a future migration window."}, "reports": map[string]any{"today": report}, "totals": totals, "nodes": nodes}
 }
 
 func (s *server) publicNodeLocked(node *codexhub.Node) map[string]any {
@@ -703,6 +736,10 @@ func (s *server) publicNodeLocked(node *codexhub.Node) map[string]any {
 		"createdAt":            node.CreatedAt,
 		"lastSeenAt":           nullableString(node.LastSeenAt),
 		"version":              node.Version,
+		"heartbeatSeq":         node.HeartbeatSeq,
+		"collectedAt":          node.CollectedAt,
+		"agentStartedAt":       node.AgentStartedAt,
+		"update":               node.Update,
 		"revokedAt":            nullableString(node.RevokedAt),
 		"host":                 node.Host,
 		"farfield":             node.Farfield,
@@ -898,7 +935,7 @@ func (s *server) installProfile(r *http.Request) map[string]any {
 	installKey := s.currentInstallKey()
 	releaseVersion := env("CODEXHUB_VERSION", version)
 	if releaseVersion == "dev" || releaseVersion == "" {
-		releaseVersion = "0.4.3"
+		releaseVersion = "0.4.4"
 	}
 	downloads := map[string]string{
 		"androidApk":         fmt.Sprintf("%s/downloads/codexhub-android-v%s.apk", base, releaseVersion),
@@ -1262,6 +1299,7 @@ func normalizeRecentMessages(value any) []codexhub.ThreadMessage {
 			Text:  text,
 			At:    row["at"],
 			Phase: stringValue(row["phase"]),
+			Role:  stringValue(row["role"]),
 		})
 	}
 	return messages

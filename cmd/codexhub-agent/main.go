@@ -35,21 +35,24 @@ type config struct {
 }
 
 type app struct {
-	cfg    config
-	client *http.Client
+	cfg       config
+	client    *http.Client
+	startedAt string
+	seq       int
 }
 
 type sessionMessage struct {
 	Text  string
 	At    any
 	Phase string
+	Role  string
 }
 
 var sessionFileIndex map[string]string
 
 func main() {
 	cfg := loadConfig()
-	agent := &app{cfg: cfg, client: &http.Client{Timeout: 20 * time.Second}}
+	agent := &app{cfg: cfg, client: &http.Client{Timeout: 20 * time.Second}, startedAt: time.Now().UTC().Format(time.RFC3339)}
 	log.Printf("CodexHub Go agent %s %s -> %s", version, cfg.NodeID, cfg.Server)
 	log.Printf("Farfield source: %s", cfg.FarfieldURL)
 	log.Printf("Agent config: %s", cfg.ConfigPath)
@@ -111,13 +114,17 @@ func (a *app) tick() {
 	if err != nil {
 		log.Printf("snapshot failed: %v", err)
 		snapshot = map[string]any{
-			"name":      a.cfg.NodeName,
-			"version":   "go-" + version,
-			"host":      hostInfo(),
-			"farfield":  map[string]any{"ok": false},
-			"threads":   []any{},
-			"metrics":   map[string]any{},
-			"lastError": err.Error(),
+			"name":             a.cfg.NodeName,
+			"version":          "go-" + version,
+			"heartbeatSeq":     a.nextSeq(),
+			"collectedAt":      time.Now().UTC().Format(time.RFC3339),
+			"agentStartedAt":   a.startedAt,
+			"agentLastErrorAt": time.Now().UTC().Format(time.RFC3339),
+			"host":             hostInfo(),
+			"farfield":         map[string]any{"ok": false},
+			"threads":          []any{},
+			"metrics":          map[string]any{},
+			"lastError":        err.Error(),
 		}
 	}
 	var response struct {
@@ -198,8 +205,16 @@ func (a *app) collectSnapshot() (map[string]any, error) {
 	}
 	threads := normalizeThreads(sidebar, health, a.cfg.Provider)
 	return map[string]any{
-		"name":      a.cfg.NodeName,
-		"version":   "go-" + version,
+		"name":           a.cfg.NodeName,
+		"version":        "go-" + version,
+		"heartbeatSeq":   a.nextSeq(),
+		"collectedAt":    time.Now().UTC().Format(time.RFC3339),
+		"agentStartedAt": a.startedAt,
+		"update": map[string]any{
+			"currentVersion":     "go-" + version,
+			"latestKnownVersion": nil,
+			"policy":             "server",
+		},
 		"host":      hostInfo(),
 		"tags":      []string{a.cfg.Provider},
 		"farfield":  normalizeFarfield(health),
@@ -207,6 +222,11 @@ func (a *app) collectSnapshot() (map[string]any, error) {
 		"threads":   threads,
 		"lastError": lastError(health),
 	}, nil
+}
+
+func (a *app) nextSeq() int {
+	a.seq++
+	return a.seq
 }
 
 func (a *app) pollCommands() int {
@@ -447,10 +467,11 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 			continue
 		}
 		payload, _ := event["payload"].(map[string]any)
-		text := extractSessionMessageText(payload)
-		if text == "" {
+		extracted := extractSessionMessage(payload)
+		if extracted == nil || extracted.Text == "" {
 			continue
 		}
+		text := extracted.Text
 		if len(text) > 1800 {
 			text = text[:1800] + "..."
 		}
@@ -458,13 +479,14 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 			Text:  text,
 			At:    event["timestamp"],
 			Phase: stringValue(payload["phase"]),
+			Role:  extracted.Role,
 		}
 		if len(recentMessages) < 20 {
-			recentMessages = append(recentMessages, codexhub.ThreadMessage{Text: entry.Text, At: entry.At, Phase: entry.Phase})
+			recentMessages = append(recentMessages, codexhub.ThreadMessage{Text: entry.Text, At: entry.At, Phase: entry.Phase, Role: entry.Role})
 		}
-		if latestFinal == nil && entry.Phase == "final_answer" {
+		if entry.Role == "assistant" && latestFinal == nil && entry.Phase == "final_answer" {
 			latestFinal = entry
-		} else if latestProgress == nil && entry.Phase != "final_answer" {
+		} else if entry.Role == "assistant" && latestProgress == nil && entry.Phase != "final_answer" {
 			latestProgress = entry
 		}
 		if latestFinal != nil && latestProgress != nil && len(recentMessages) >= 20 {
@@ -503,15 +525,19 @@ func reverseThreadMessages(messages []codexhub.ThreadMessage) []codexhub.ThreadM
 	return out
 }
 
-func extractSessionMessageText(payload map[string]any) string {
+func extractSessionMessage(payload map[string]any) *sessionMessage {
 	if payload == nil {
-		return ""
+		return nil
 	}
 	if stringValue(payload["type"]) == "agent_message" {
-		return strings.TrimSpace(stringValue(payload["message"]))
+		text := strings.TrimSpace(stringValue(payload["message"]))
+		if text == "" {
+			return nil
+		}
+		return &sessionMessage{Role: "assistant", Text: text, Phase: stringValue(payload["phase"])}
 	}
-	if stringValue(payload["type"]) != "message" || stringValue(payload["role"]) != "assistant" {
-		return ""
+	if stringValue(payload["type"]) != "message" {
+		return nil
 	}
 	texts := []string{}
 	for _, partAny := range anySlice(payload["content"]) {
@@ -523,7 +549,11 @@ func extractSessionMessageText(payload map[string]any) string {
 			texts = append(texts, text)
 		}
 	}
-	return strings.TrimSpace(strings.Join(texts, "\n"))
+	text := strings.TrimSpace(strings.Join(texts, "\n"))
+	if text == "" {
+		return nil
+	}
+	return &sessionMessage{Role: firstNonEmpty(stringValue(payload["role"]), "message"), Text: text, Phase: stringValue(payload["phase"])}
 }
 
 func valueTime(value any) int64 {

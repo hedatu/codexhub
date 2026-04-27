@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.4
+
+- Added configurable webhook/FCM push delivery hooks and push registration/test APIs.
+- Added heartbeat sequence, collection timestamps, agent start time, and update metadata to desktop heartbeats.
+- Added explicit task state labels for running, waiting reply, waiting approval, completed unread, failed, and archived states.
+- Expanded the mobile inbox into unread, pending, completed, failed, and all filters.
+- Added daily fleet report metrics and storage status to the dashboard and install/settings panel.
+- Added installer preflight diagnostics for Windows, Linux, and macOS agent installers.
+- Added release manifest generation with SHA256 checksums for update verification.
+- Synced richer Codex session context, including recent user and assistant messages.
+
 ## v0.4.3
 
 - Added Companion update checks against GitHub Releases.

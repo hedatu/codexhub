@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.3",
+  [string]$Version = "0.4.4",
   [string]$OutputDir = "$PSScriptRoot\..\dist",
   [switch]$Sign
 )

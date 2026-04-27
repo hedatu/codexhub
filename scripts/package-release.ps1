@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.3"
+  [string]$Version = "0.4.4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -202,6 +202,23 @@ if (Get-Command go.exe -ErrorAction SilentlyContinue) {
 } else {
   Write-Warning "go.exe was not found; skipping Windows Companion installer build."
 }
+
+$manifest = Get-ChildItem -LiteralPath $dist -File |
+  Where-Object { $_.Name -like "*v$Version*" } |
+  Sort-Object Name |
+  ForEach-Object {
+    [ordered]@{
+      name = $_.Name
+      size = $_.Length
+      sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+    }
+  }
+@{
+  version = $Version
+  generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  updatePolicy = "prompt"
+  assets = $manifest
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dist "codexhub-release-manifest-v$Version.json") -Encoding UTF8
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 Get-ChildItem -LiteralPath $dist -File | Select-Object Name,Length

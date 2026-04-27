@@ -23,6 +23,7 @@ type ThreadMessage struct {
 	Text  string `json:"text,omitempty"`
 	At    any    `json:"at,omitempty"`
 	Phase string `json:"phase,omitempty"`
+	Role  string `json:"role,omitempty"`
 }
 
 type Thread struct {
@@ -78,22 +79,26 @@ type Notification struct {
 }
 
 type Node struct {
-	ID            string         `json:"id"`
-	Name          string         `json:"name"`
-	DeviceKey     string         `json:"deviceKey,omitempty"`
-	CreatedAt     string         `json:"createdAt,omitempty"`
-	EnrolledAt    string         `json:"enrolledAt,omitempty"`
-	LastSeenAt    string         `json:"lastSeenAt,omitempty"`
-	Version       any            `json:"version,omitempty"`
-	RevokedAt     string         `json:"revokedAt,omitempty"`
-	Tags          []string       `json:"tags,omitempty"`
-	Host          any            `json:"host,omitempty"`
-	Farfield      any            `json:"farfield,omitempty"`
-	Metrics       map[string]any `json:"metrics,omitempty"`
-	Threads       []Thread       `json:"threads,omitempty"`
-	Commands      []Command      `json:"commands,omitempty"`
-	Notifications []Notification `json:"notifications,omitempty"`
-	LastError     any            `json:"lastError,omitempty"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	DeviceKey      string         `json:"deviceKey,omitempty"`
+	CreatedAt      string         `json:"createdAt,omitempty"`
+	EnrolledAt     string         `json:"enrolledAt,omitempty"`
+	LastSeenAt     string         `json:"lastSeenAt,omitempty"`
+	Version        any            `json:"version,omitempty"`
+	HeartbeatSeq   any            `json:"heartbeatSeq,omitempty"`
+	CollectedAt    any            `json:"collectedAt,omitempty"`
+	AgentStartedAt any            `json:"agentStartedAt,omitempty"`
+	Update         any            `json:"update,omitempty"`
+	RevokedAt      string         `json:"revokedAt,omitempty"`
+	Tags           []string       `json:"tags,omitempty"`
+	Host           any            `json:"host,omitempty"`
+	Farfield       any            `json:"farfield,omitempty"`
+	Metrics        map[string]any `json:"metrics,omitempty"`
+	Threads        []Thread       `json:"threads,omitempty"`
+	Commands       []Command      `json:"commands,omitempty"`
+	Notifications  []Notification `json:"notifications,omitempty"`
+	LastError      any            `json:"lastError,omitempty"`
 }
 
 type AuditEntry struct {

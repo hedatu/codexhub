@@ -8,10 +8,17 @@ const dom = {
   installPanel: document.querySelector("#installPanel"),
   mobileServerOutput: document.querySelector("#mobileServerOutput"),
   adminTokenOutput: document.querySelector("#adminTokenOutput"),
+  readonlyTokenOutput: document.querySelector("#readonlyTokenOutput"),
   installKeyOutput: document.querySelector("#installKeyOutput"),
+  androidApkOutput: document.querySelector("#androidApkOutput"),
   desktopInstallCommand: document.querySelector("#desktopInstallCommand"),
   linuxInstallCommand: document.querySelector("#linuxInstallCommand"),
   macosInstallCommand: document.querySelector("#macosInstallCommand"),
+  pushTokenInput: document.querySelector("#pushTokenInput"),
+  registerPushBtn: document.querySelector("#registerPushBtn"),
+  testPushBtn: document.querySelector("#testPushBtn"),
+  dailyReportText: document.querySelector("#dailyReportText"),
+  storageText: document.querySelector("#storageText"),
   rotateInstallKeyBtn: document.querySelector("#rotateInstallKeyBtn"),
   saveConfigBtn: document.querySelector("#saveConfigBtn"),
   settingsBtn: document.querySelector("#settingsBtn"),
@@ -22,6 +29,8 @@ const dom = {
   metricRunning: document.querySelector("#metricRunning"),
   metricReply: document.querySelector("#metricReply"),
   metricApproval: document.querySelector("#metricApproval"),
+  metricCompleted: document.querySelector("#metricCompleted"),
+  metricFailed: document.querySelector("#metricFailed"),
   attentionCount: document.querySelector("#attentionCount"),
   attentionList: document.querySelector("#attentionList"),
   syncDiagnostics: document.querySelector("#syncDiagnostics"),
@@ -140,6 +149,9 @@ function statusLabel(node) {
 }
 
 function threadStatus(thread) {
+  if (thread.taskState === "failed") return { className: "approval", text: "失败" };
+  if (thread.taskState === "completed_unread") return { className: "waiting", text: "已完成未读" };
+  if (thread.taskState === "completed") return { className: "online", text: "已完成" };
   if (thread.attentionKind === "completed") return { className: "waiting", text: "任务完成" };
   if (thread.attentionKind === "updated") return { className: "waiting", text: thread.readAt ? "已读" : "未读" };
   if (thread.attentionKind === "commandFailed") return { className: "approval", text: "发送失败" };
@@ -202,6 +214,9 @@ function auditLabel(type) {
     "install_key.rotated": "安装密钥轮换",
     "command.queued": "命令下发",
     "command.completed": "命令完成",
+    "push.registered": "推送登记",
+    "push.delivered": "推送投递",
+    "push.failed": "推送失败",
   };
   return labels[type] || type || "操作";
 }
@@ -397,11 +412,15 @@ function render() {
     waitingReply: Number(totals.waitingReply ?? 0),
     waitingApproval: Number(totals.waitingApproval ?? 0),
     attention: Number(totals.attention ?? 0),
+    completedToday: Number(totals.completedToday ?? 0),
+    failedCommands: Number(totals.failedCommands ?? 0),
   };
   dom.metricOnline.textContent = `${safeTotals.online}/${safeTotals.nodes}`;
   dom.metricRunning.textContent = String(safeTotals.running);
   dom.metricReply.textContent = String(safeTotals.waitingReply);
   dom.metricApproval.textContent = String(safeTotals.waitingApproval);
+  dom.metricCompleted.textContent = String(safeTotals.completedToday);
+  dom.metricFailed.textContent = String(safeTotals.failedCommands);
   dom.attentionCount.textContent = String(safeTotals.attention);
   dom.nodeRange.textContent = safeTotals.nodes > 0 ? `${safeTotals.nodes} 台电脑` : "等待上报";
   renderAttention(dashboard.nodes);
@@ -409,6 +428,7 @@ function render() {
   renderDiagnostics(dashboard.nodes);
   renderDetail();
   renderInstallProfile();
+  renderOpsStatus();
 }
 
 function renderInstallProfile() {
@@ -420,10 +440,13 @@ function renderInstallProfile() {
   dom.installPanel.classList.remove("hidden");
   dom.mobileServerOutput.value = profile.mobile?.serverUrl ?? profile.serverUrl ?? "";
   dom.adminTokenOutput.value = profile.mobile?.token ?? "";
+  dom.readonlyTokenOutput.value = profile.readonlyToken ?? "";
   dom.installKeyOutput.value = profile.installKey ?? "";
+  dom.androidApkOutput.value = profile.downloads?.androidApk ?? "";
   dom.desktopInstallCommand.value = profile.desktop?.windows ?? profile.desktop?.powershell ?? "";
   dom.linuxInstallCommand.value = profile.desktop?.linux ?? "";
   dom.macosInstallCommand.value = profile.desktop?.macos ?? "";
+  renderOpsStatus();
 }
 
 function showSettings() {
@@ -447,7 +470,9 @@ function renderAttention(nodes) {
     (node.notifications ?? [])
       .filter((notice) => {
         if (state.inboxFilter === "unread") return !notice.readAt;
-        if (state.inboxFilter === "read") return Boolean(notice.readAt);
+        if (state.inboxFilter === "pending") return !notice.readAt && !["completed", "updated"].includes(notice.type);
+        if (state.inboxFilter === "completed") return ["completed", "updated"].includes(notice.type);
+        if (state.inboxFilter === "failed") return notice.type === "commandFailed";
         return true;
       })
       .map((notice) => ({
@@ -463,13 +488,22 @@ function renderAttention(nodes) {
           notificationId: notice.id,
           notificationCreatedAt: notice.createdAt,
           readAt: notice.readAt,
+          taskState: notice.type === "commandFailed" ? "failed" : notice.readAt ? "archived" : "completed_unread",
+          taskStateLabel: notice.type === "commandFailed" ? "失败" : notice.readAt ? "已读归档" : "已完成未读",
         },
         status: notice.readAt ? { className: "online", text: "已读" } : threadStatus({ attentionKind: notice.type }),
       })),
   );
-  const liveItems = state.inboxFilter === "read" ? [] : nodes.flatMap((node) =>
+  const liveItems = nodes.flatMap((node) =>
     (node.attention ?? [])
       .filter((thread) => !thread.notificationId)
+      .filter((thread) => {
+        if (state.inboxFilter === "unread") return thread.requiresAction;
+        if (state.inboxFilter === "pending") return ["waiting_reply", "waiting_approval"].includes(thread.taskState) || thread.waitingOnUserInput || thread.waitingOnApproval;
+        if (state.inboxFilter === "completed") return ["completed", "completed_unread"].includes(thread.taskState) || Boolean(thread.latestFinalMessageAt || thread.latestFinalMessage);
+        if (state.inboxFilter === "failed") return thread.taskState === "failed" || thread.attentionKind === "commandFailed";
+        return true;
+      })
       .map((thread) => ({
       node,
       thread,
@@ -480,7 +514,8 @@ function renderAttention(nodes) {
     .sort((a, b) => toMillis(b.thread.notificationCreatedAt || b.thread.updatedAt) - toMillis(a.thread.notificationCreatedAt || a.thread.updatedAt));
 
   if (items.length === 0) {
-    dom.attentionList.innerHTML = `<div class="attention-card"><p class="preview">暂无${state.inboxFilter === "read" ? "已读" : state.inboxFilter === "all" ? "" : "未读"}消息。</p></div>`;
+    const emptyLabel = { unread: "未读", pending: "待处理", completed: "已完成", failed: "失败", all: "" }[state.inboxFilter] ?? "";
+    dom.attentionList.innerHTML = `<div class="attention-card"><p class="preview">暂无${emptyLabel}消息。</p></div>`;
     return;
   }
 
@@ -489,7 +524,7 @@ function renderAttention(nodes) {
       <div class="card-top">
         <div class="task-title">
           <strong>${escapeHtml(node.name)} · ${escapeHtml(threadTitle(thread))}</strong>
-          <span>${escapeHtml(thread.attentionKind ? (thread.readAt ? "已读通知" : "未读通知") : (thread.cwd || thread.source || thread.provider))} · ${timeAgo(toMillis(thread.notificationCreatedAt || thread.updatedAt || node.lastSeenAt))}</span>
+          <span>${escapeHtml(thread.taskStateLabel || (thread.attentionKind ? (thread.readAt ? "已读通知" : "未读通知") : (thread.cwd || thread.source || thread.provider)))} · ${timeAgo(toMillis(thread.notificationCreatedAt || thread.updatedAt || node.lastSeenAt))}</span>
         </div>
         <span class="status-chip ${status.className}">${status.text}</span>
       </div>
@@ -580,6 +615,18 @@ function renderDiagnostics(nodes) {
       ${nodes.map(renderDiagnosticCard).join("")}
     </div>
   `;
+}
+
+function renderOpsStatus() {
+  if (!state.dashboard) return;
+  const report = state.dashboard.reports?.today;
+  if (dom.dailyReportText && report) {
+    dom.dailyReportText.textContent = `${report.date}：更新 ${report.updatedThreads} 个线程，完成 ${report.completedThreads} 个，失败命令 ${report.failedCommands} 条，在线 ${report.onlineNodes}/${report.totalNodes} 台。`;
+  }
+  if (dom.storageText) {
+    const storage = state.dashboard.storage ?? {};
+    dom.storageText.textContent = `${storage.driver || "json"} · ${storage.sqliteNote || "状态文件持久化已启用"}`;
+  }
 }
 
 function renderDiagnosticCard(node) {
@@ -928,6 +975,27 @@ async function rotateInstallKey() {
   renderInstallProfile();
 }
 
+async function registerPushToken() {
+  const token = dom.pushTokenInput?.value?.trim();
+  if (!token) {
+    showToast("请输入 FCM token");
+    return;
+  }
+  await apiFetch("/api/push/register", {
+    method: "POST",
+    body: JSON.stringify({ type: "fcm", token, label: navigator.userAgent.slice(0, 80) }),
+  });
+  showToast("推送令牌已登记");
+}
+
+async function testPush() {
+  await apiFetch("/api/push/test", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  showToast("测试通知已提交");
+}
+
 async function revokeNode(nodeId) {
   await apiFetch(`/api/nodes/${encodeURIComponent(nodeId)}/revoke`, {
     method: "POST",
@@ -965,6 +1033,8 @@ dom.nodeSearchInput?.addEventListener("input", () => {
 });
 dom.closeDetailBtn.addEventListener("click", () => dom.detailPane.classList.remove("open"));
 dom.markAllReadBtn?.addEventListener("click", markAllNotificationsRead);
+dom.registerPushBtn?.addEventListener("click", registerPushToken);
+dom.testPushBtn?.addEventListener("click", testPush);
 dom.rotateInstallKeyBtn?.addEventListener("click", async () => {
   if (confirm("确定轮换安装密钥？旧安装命令会立刻失效，已经登记的电脑不受影响。")) {
     await rotateInstallKey();

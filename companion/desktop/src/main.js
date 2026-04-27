@@ -266,20 +266,42 @@ function compareVersion(a, b) {
   return 0;
 }
 
+async function downloadUpdateInstaller(asset) {
+  const target = path.join(os.tmpdir(), asset.name || "codexhub-companion-update.exe");
+  const response = await fetch(asset.browser_download_url);
+  if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(target, bytes);
+  if (asset.size && bytes.length !== asset.size) {
+    throw new Error(`Downloaded size mismatch: ${bytes.length} != ${asset.size}`);
+  }
+  return target;
+}
+
 async function checkForUpdates(interactive = true) {
   try {
     const result = await fetchJson(LATEST_RELEASE_API);
     if (!result.ok) throw new Error(result.payload?.message || `HTTP ${result.status}`);
     const latest = String(result.payload?.tag_name || "").replace(/^v/, "");
     if (latest && compareVersion(latest, pkg.version) > 0) {
+      const installerAsset = (result.payload?.assets ?? []).find((asset) => /companion-installer-windows-x64.*\.exe$/i.test(asset.name || ""));
       const choice = await dialog.showMessageBox({
         type: "info",
-        buttons: [currentLanguage === "en" ? "Open Release" : "打开下载页", currentLanguage === "en" ? "Later" : "稍后"],
+        buttons: [
+          installerAsset && process.platform === "win32" ? (currentLanguage === "en" ? "Install Update" : "下载并安装") : (currentLanguage === "en" ? "Open Release" : "打开下载页"),
+          currentLanguage === "en" ? "Open Release" : "打开下载页",
+          currentLanguage === "en" ? "Later" : "稍后",
+        ],
         defaultId: 0,
         message: text().updateReady(latest),
         detail: result.payload?.html_url || "https://github.com/hedatu/codexhub/releases/latest",
       });
-      if (choice.response === 0) await shell.openExternal(result.payload.html_url);
+      if (choice.response === 0 && installerAsset && process.platform === "win32") {
+        const installer = await downloadUpdateInstaller(installerAsset);
+        await shell.openPath(installer);
+      } else if (choice.response === 0 || choice.response === 1) {
+        await shell.openExternal(result.payload.html_url);
+      }
       return { ok: true, latest, updateAvailable: true };
     }
     if (interactive) {

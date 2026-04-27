@@ -24,16 +24,22 @@ const (
 	publisher = "Hedatu"
 )
 
-var defaultVersion = "0.4.3"
+var defaultVersion = "0.4.4"
 
 func main() {
 	version := flag.String("version", defaultVersion, "CodexHub Companion version to install")
 	url := flag.String("url", "", "Companion zip URL")
 	sha256sum := flag.String("sha256", "", "expected SHA256 hash for the downloaded zip")
 	uninstall := flag.Bool("uninstall", false, "uninstall CodexHub Companion")
+	diagnose := flag.Bool("diagnose", false, "print Companion install diagnostics")
 	noStart := flag.Bool("no-start", false, "do not start Companion after install")
 	noStartup := flag.Bool("no-startup", false, "do not register Companion to start at user login")
 	flag.Parse()
+
+	if *diagnose {
+		printDiagnostics(*version)
+		return
+	}
 
 	if *uninstall {
 		must(uninstallCompanion())
@@ -92,6 +98,25 @@ func companionInstallerDir() string {
 		localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 	}
 	return filepath.Join(localAppData, "CodexHub Companion Installer")
+}
+
+func printDiagnostics(version string) {
+	installDir := companionInstallDir()
+	exePath := filepath.Join(installDir, "CodexHub Companion.exe")
+	fmt.Println("CodexHub Companion diagnostics")
+	fmt.Println("Version:", version)
+	fmt.Println("InstallDir:", installDir)
+	if _, err := os.Stat(exePath); err == nil {
+		fmt.Println("Executable: present")
+	} else {
+		fmt.Println("Executable: missing")
+	}
+	fmt.Println("DefaultDownload:", fmt.Sprintf("https://github.com/hedatu/codexhub/releases/download/v%s/codexhub-companion-windows-x64-v%s.zip", version, version))
+	if err := exec.Command("reg", "query", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", appName).Run(); err == nil {
+		fmt.Println("Startup: registered")
+	} else {
+		fmt.Println("Startup: missing")
+	}
 }
 
 func startMenuShortcutPath() string {

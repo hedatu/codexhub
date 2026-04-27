@@ -19,10 +19,13 @@ const INSTALL_KEY = config.installKey ?? process.env.CODEXHUB_INSTALL_KEY ?? sav
 const FARFIELD_URL = stripSlash(config.farfield ?? process.env.FARFIELD_URL ?? savedConfig.farfieldUrl ?? "http://127.0.0.1:4311");
 const INTERVAL_MS = Number(config.interval ?? process.env.CODEXHUB_INTERVAL_MS ?? 5_000);
 const PROVIDER = config.provider ?? process.env.CODEXHUB_PROVIDER ?? "codex";
+const AGENT_VERSION = "0.4.4";
+const AGENT_STARTED_AT = new Date().toISOString();
 const CODEX_HOME = path.resolve(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
 const SESSION_ROOT = path.join(CODEX_HOME, "sessions");
 const SESSION_CACHE = new Map();
 let sessionFileIndex = null;
+let heartbeatSeq = 0;
 
 function parseArgs(args) {
   const out = {};
@@ -225,6 +228,22 @@ function extractMessageText(payload) {
     .trim();
 }
 
+function extractTranscriptEntry(event) {
+  const payload = event?.payload ?? {};
+  if (payload.type === "agent_message" && typeof payload.message === "string") {
+    return { role: "assistant", text: payload.message, phase: payload.phase ?? null };
+  }
+  if (payload.type !== "message") return null;
+  const parts = Array.isArray(payload.content) ? payload.content : [];
+  const text = parts
+    .map((part) => typeof part?.text === "string" ? part.text : "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (!text) return null;
+  return { role: payload.role ?? "message", text, phase: payload.phase ?? null };
+}
+
 function readLatestSessionMessage(threadId) {
   const filePath = sessionFileForThread(threadId);
   if (!filePath) return {};
@@ -249,19 +268,22 @@ function readLatestSessionMessage(threadId) {
       } catch {
         continue;
       }
-      const text = extractMessageText(event.payload);
-      if (!text) continue;
+      const transcript = extractTranscriptEntry(event);
+      if (!transcript?.text) continue;
+      const text = transcript.role === "assistant" ? transcript.text : `${transcript.role}: ${transcript.text}`;
       const phase = event.payload?.phase ?? null;
       const entry = {
         text: text.length > 1800 ? `${text.slice(0, 1800)}...` : text,
         at: event.timestamp ?? null,
         phase,
+        role: transcript.role,
       };
       if (recentMessages.length < 20) recentMessages.push(entry);
-      if (!latestFinal && phase === "final_answer") {
-        latestFinal = entry;
-      } else if (!latestProgress && phase !== "final_answer") {
-        latestProgress = entry;
+      const assistantText = extractMessageText(event.payload);
+      if (assistantText && !latestFinal && phase === "final_answer") {
+        latestFinal = { ...entry, text: assistantText.length > 1800 ? `${assistantText.slice(0, 1800)}...` : assistantText };
+      } else if (assistantText && !latestProgress && phase !== "final_answer") {
+        latestProgress = { ...entry, text: assistantText.length > 1800 ? `${assistantText.slice(0, 1800)}...` : assistantText };
       }
       if (latestFinal && latestProgress && recentMessages.length >= 20) break;
     }
@@ -306,7 +328,15 @@ async function collectSnapshot() {
   const farfield = normalizeFarfieldState(health);
   return {
     name: NODE_NAME,
-    version: "0.1.0",
+    version: AGENT_VERSION,
+    heartbeatSeq: heartbeatSeq += 1,
+    collectedAt: new Date().toISOString(),
+    agentStartedAt: AGENT_STARTED_AT,
+    update: {
+      currentVersion: AGENT_VERSION,
+      latestKnownVersion: null,
+      policy: "server",
+    },
     host: {
       hostname: os.hostname(),
       platform: os.platform(),
@@ -421,7 +451,11 @@ async function tick() {
     try {
       await postJson(`${SERVER}/api/nodes/${encodeURIComponent(NODE_ID)}/heartbeat`, {
         name: NODE_NAME,
-        version: "0.1.0",
+        version: AGENT_VERSION,
+        heartbeatSeq: heartbeatSeq += 1,
+        collectedAt: new Date().toISOString(),
+        agentStartedAt: AGENT_STARTED_AT,
+        agentLastErrorAt: new Date().toISOString(),
         host: { hostname: os.hostname(), platform: os.platform(), release: os.release(), arch: os.arch() },
         farfield: { ok: false },
         threads: [],

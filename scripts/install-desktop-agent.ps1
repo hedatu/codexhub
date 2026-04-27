@@ -15,6 +15,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$preflight = [ordered]@{
+  os = "windows"
+  user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  node = [bool](Get-Command node.exe -ErrorAction SilentlyContinue)
+  npx = [bool](Get-Command npx.cmd -ErrorAction SilentlyContinue)
+  codex = [bool](Get-Command codex.exe -ErrorAction SilentlyContinue)
+  scheduledTasks = [bool](Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)
+  checkedAt = (Get-Date).ToUniversalTime().ToString("o")
+}
+
 function Resolve-Node {
   $node = Get-Command node.exe -ErrorAction SilentlyContinue
   if (-not $node) {
@@ -36,6 +46,7 @@ $nodeExe = $null
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "src\desktop-agent") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "bin") | Out-Null
+$preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $InstallDir "install-preflight.json") -Encoding UTF8
 
 $agentExe = Join-Path $InstallDir "bin\codexhub-agent.exe"
 if (Test-Path -LiteralPath $goAgentSource) {

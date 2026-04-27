@@ -18,18 +18,34 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
-const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.3";
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.4";
+const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
+const PUSH_WEBHOOK_URL = process.env.CODEXHUB_PUSH_WEBHOOK_URL ?? "";
+const FCM_SERVER_KEY = process.env.CODEXHUB_FCM_SERVER_KEY ?? "";
+const FCM_ENDPOINT = process.env.CODEXHUB_FCM_ENDPOINT ?? "https://fcm.googleapis.com/fcm/send";
+const AGENT_UPDATE_POLICY = process.env.CODEXHUB_AGENT_UPDATE_POLICY ?? "prompt";
+const REPORT_TZ_OFFSET_MINUTES = Number(process.env.CODEXHUB_REPORT_TZ_OFFSET_MINUTES ?? 480);
 
 const state = {
   startedAt: new Date().toISOString(),
   nodes: new Map(),
   auditLogs: [],
+  pushSubscriptions: [],
   installKey: DEFAULT_INSTALL_KEY,
   sseClients: new Set(),
 };
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function reportDay() {
+  const now = Date.now();
+  const offsetMs = REPORT_TZ_OFFSET_MINUTES * 60_000;
+  const shifted = new Date(now + offsetMs);
+  const date = `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+  const startMs = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - offsetMs;
+  return { date, startMs, offsetMinutes: REPORT_TZ_OFFSET_MINUTES };
 }
 
 function stripSlash(value) {
@@ -59,6 +75,9 @@ function loadState() {
   if (Array.isArray(parsed.auditLogs)) {
     state.auditLogs = parsed.auditLogs.slice(-500);
   }
+  if (Array.isArray(parsed.pushSubscriptions)) {
+    state.pushSubscriptions = parsed.pushSubscriptions.slice(-200);
+  }
   if (typeof parsed.installKey === "string" && parsed.installKey.trim()) {
     state.installKey = parsed.installKey.trim();
   }
@@ -68,8 +87,11 @@ function persistState() {
   if (!DATA_FILE) return;
   const payload = {
     savedAt: nowIso(),
+    schemaVersion: 2,
+    storageDriver: STORAGE_DRIVER,
     installKey: state.installKey,
     auditLogs: state.auditLogs.slice(-500),
+    pushSubscriptions: state.pushSubscriptions.slice(-200),
     nodes: [...state.nodes.values()].map((node) => ({
       ...node,
       commands: node.commands.filter((command) => command.status !== "done"),
@@ -137,6 +159,17 @@ function recordAudit(type, actor, details = {}) {
   return entry;
 }
 
+function storageStatus() {
+  return {
+    driver: STORAGE_DRIVER,
+    file: DATA_FILE,
+    sqliteEnabled: STORAGE_DRIVER === "sqlite",
+    sqliteNote: STORAGE_DRIVER === "sqlite"
+      ? "SQLite mode is configured. JSON snapshots are still kept as a compatible fallback."
+      : "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite in a future migration window to enable SQLite-backed history.",
+  };
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -202,6 +235,7 @@ function buildInstallProfile(req) {
   return {
     ok: true,
     version: RELEASE_VERSION,
+    updatePolicy: AGENT_UPDATE_POLICY,
     serverUrl: publicBaseUrl,
     adminToken: ADMIN_TOKEN,
     readonlyToken: READONLY_TOKEN || null,
@@ -229,6 +263,70 @@ function sendEvent(event) {
       state.sseClients.delete(client);
     }
   }
+}
+
+async function postJsonExternal(url, payload, headers = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    return { ok: response.ok, status: response.status, text: await response.text().catch(() => "") };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function deliverNotification(notification) {
+  const payload = {
+    version: RELEASE_VERSION,
+    sentAt: nowIso(),
+    notification,
+  };
+  const deliveries = [];
+  if (PUSH_WEBHOOK_URL) {
+    deliveries.push(postJsonExternal(PUSH_WEBHOOK_URL, payload).then((result) => ({ provider: "webhook", ...result })));
+  }
+  const fcmTokens = state.pushSubscriptions
+    .filter((item) => item.type === "fcm" && item.token && !item.revokedAt)
+    .map((item) => item.token);
+  if (FCM_SERVER_KEY && fcmTokens.length > 0) {
+    deliveries.push(postJsonExternal(FCM_ENDPOINT, {
+      registration_ids: fcmTokens.slice(0, 500),
+      notification: {
+        title: notification.title || "CodexHub",
+        body: notification.preview || "有新的待处理事项",
+      },
+      data: {
+        nodeId: notification.nodeId || "",
+        threadId: notification.threadId || "",
+        type: notification.type || "notification",
+        url: "/",
+      },
+    }, { authorization: `key=${FCM_SERVER_KEY}` }).then((result) => ({ provider: "fcm", ...result })));
+  }
+  if (deliveries.length === 0) return;
+  const results = await Promise.allSettled(deliveries);
+  recordAudit("push.delivered", "system", {
+    type: notification.type,
+    nodeId: notification.nodeId,
+    threadId: notification.threadId,
+    results: results.map((result) => result.status === "fulfilled" ? result.value : { ok: false, error: String(result.reason) }),
+  });
+}
+
+function notifyExternal(node, notice) {
+  deliverNotification({
+    ...notice,
+    nodeId: node.id,
+    nodeName: node.name ?? node.id,
+  }).catch((error) => {
+    recordAudit("push.failed", "system", { nodeId: node.id, error: error instanceof Error ? error.message : String(error) });
+  });
 }
 
 function getNodeStatus(node) {
@@ -311,6 +409,10 @@ function buildSyncHealth(node, status, threads, unread) {
     overall,
     checks,
     lastSeenAgeMs: valueTime(node.lastSeenAt) ? Math.max(0, Date.now() - valueTime(node.lastSeenAt)) : null,
+    heartbeatSeq: node.heartbeatSeq ?? null,
+    collectedAt: node.collectedAt ?? null,
+    agentStartedAt: node.agentStartedAt ?? null,
+    agentLastErrorAt: node.agentLastErrorAt ?? null,
     latestThread: latestThread ? {
       id: latestThread.id,
       title: latestThread.title ?? null,
@@ -331,6 +433,37 @@ function buildSyncHealth(node, status, threads, unread) {
       error: recentCommand.result?.error ?? recentCommand.result?.result?.error ?? null,
     } : null,
     unreadNotifications: unread.length,
+  };
+}
+
+function deriveThreadState(thread) {
+  if (thread.attentionKind === "commandFailed") return "failed";
+  if (thread.attentionKind === "completed") return thread.readAt ? "archived" : "completed_unread";
+  if (thread.attentionKind === "updated") return thread.readAt ? "archived" : "completed_unread";
+  if (thread.waitingOnApproval) return "waiting_approval";
+  if (thread.waitingOnUserInput) return "waiting_reply";
+  if (thread.isGenerating) return "running";
+  if (thread.latestFinalMessageAt || thread.latestFinalMessage) return thread.readAt ? "archived" : "completed";
+  return "idle";
+}
+
+function withThreadState(thread) {
+  const taskState = deriveThreadState(thread);
+  const labels = {
+    running: "运行中",
+    waiting_reply: "等待回复",
+    waiting_approval: "待审批",
+    completed: "已完成",
+    completed_unread: "已完成未读",
+    failed: "失败",
+    archived: "已读归档",
+    idle: "空闲",
+  };
+  return {
+    ...thread,
+    taskState,
+    taskStateLabel: labels[taskState] ?? taskState,
+    requiresAction: ["waiting_reply", "waiting_approval", "completed_unread", "failed"].includes(taskState),
   };
 }
 
@@ -364,6 +497,7 @@ function normalizeRecentMessages(messages) {
     text: String(message?.text ?? "").slice(0, 1800),
     at: message?.at ?? null,
     phase: message?.phase ?? null,
+    role: message?.role ?? null,
   })).filter((message) => message.text.trim());
 }
 
@@ -384,18 +518,21 @@ function addNodeNotification(node, notification) {
     existingUnread.preview = notification.preview;
     existingUnread.createdAt = nowIso();
     existingUnread.dedupeKey = `${notification.type}:${notification.threadId}:${notification.threadUpdatedAt ?? ""}`;
+    notifyExternal(node, existingUnread);
     return;
   }
   const dedupeKey = `${notification.type}:${notification.threadId}:${notification.threadUpdatedAt ?? ""}`;
   if (node.notifications.some((item) => item.dedupeKey === dedupeKey)) return;
-  node.notifications.push({
+  const notice = {
     id: randomUUID(),
     createdAt: nowIso(),
     readAt: null,
     dedupeKey,
     ...notification,
-  });
+  };
+  node.notifications.push(notice);
   node.notifications = node.notifications.slice(-100);
+  notifyExternal(node, notice);
 }
 
 function updateThreadNotifications(node, previousThreads, nextThreads, previousLastSeenAt = null) {
@@ -456,13 +593,13 @@ function deriveMetrics(threads) {
 
 function publicNode(node) {
   const status = getNodeStatus(node);
-  const threads = sortThreads(Array.isArray(node.threads) ? node.threads.map(normalizeThread) : []);
+  const threads = sortThreads(Array.isArray(node.threads) ? node.threads.map(normalizeThread).map(withThreadState) : []);
   const notifications = Array.isArray(node.notifications) ? node.notifications : [];
   const unread = notifications.filter((item) => !item.readAt);
   const metrics = { ...deriveMetrics(threads), ...(node.metrics ?? {}) };
   metrics.attention = (metrics.attention ?? 0) + unread.length;
   const waitingAttention = threads.filter((thread) => thread.waitingOnUserInput || thread.waitingOnApproval);
-  const notificationAttention = unread.map((notice) => ({
+  const notificationAttention = unread.map((notice) => withThreadState({
     id: notice.threadId,
     provider: "codex",
     title: notice.title,
@@ -490,6 +627,10 @@ function publicNode(node) {
     createdAt: node.createdAt,
     lastSeenAt: node.lastSeenAt ?? null,
     version: node.version ?? null,
+    heartbeatSeq: node.heartbeatSeq ?? null,
+    collectedAt: node.collectedAt ?? null,
+    agentStartedAt: node.agentStartedAt ?? null,
+    update: node.update ?? null,
     revokedAt: node.revokedAt ?? null,
     host: node.host ?? null,
     farfield: node.farfield ?? null,
@@ -509,10 +650,33 @@ function publicNode(node) {
 function dashboardState() {
   const nodes = [...state.nodes.values()].map(publicNode).sort((a, b) => a.id.localeCompare(b.id));
   const online = nodes.filter((node) => node.status === "online").length;
+  const allThreads = nodes.flatMap((node) => (node.threads ?? []).map((thread) => ({ node, thread })));
+  const today = reportDay();
+  const completedToday = allThreads.filter(({ thread }) => (
+    ["completed", "completed_unread", "archived"].includes(thread.taskState) &&
+    valueTime(thread.latestFinalMessageAt ?? thread.latestMessageAt ?? thread.updatedAt) >= today.startMs
+  )).length;
+  const updatedToday = allThreads.filter(({ thread }) => (
+    valueTime(thread.latestFinalMessageAt ?? thread.latestProgressMessageAt ?? thread.latestMessageAt ?? thread.updatedAt ?? thread.createdAt) >= today.startMs
+  )).length;
+  const failedCommands = nodes.reduce((sum, node) => sum + (node.syncHealth?.commandCounts?.failed ?? 0), 0);
   return {
     ok: true,
+    version: RELEASE_VERSION,
     generatedAt: nowIso(),
     startedAt: state.startedAt,
+    storage: storageStatus(),
+    reports: {
+      today: {
+        date: today.date,
+        timezoneOffsetMinutes: today.offsetMinutes,
+        updatedThreads: updatedToday,
+        completedThreads: completedToday,
+        failedCommands,
+        onlineNodes: online,
+        totalNodes: nodes.length,
+      },
+    },
     totals: {
       nodes: nodes.length,
       online,
@@ -522,7 +686,9 @@ function dashboardState() {
       waitingApproval: nodes.reduce((sum, node) => sum + node.metrics.waitingApproval, 0),
       attention: nodes.reduce((sum, node) => sum + node.metrics.attention, 0),
       unread: nodes.reduce((sum, node) => sum + (node.syncHealth?.unreadNotifications ?? 0), 0),
-      failedCommands: nodes.reduce((sum, node) => sum + (node.syncHealth?.commandCounts?.failed ?? 0), 0),
+      completedToday,
+      updatedToday,
+      failedCommands,
     },
     nodes,
   };
@@ -619,6 +785,12 @@ const server = http.createServer(async (req, res) => {
       writeJson(res, 200, {
         ok: true,
         version: RELEASE_VERSION,
+        storage: storageStatus(),
+        push: {
+          webhookConfigured: Boolean(PUSH_WEBHOOK_URL),
+          fcmConfigured: Boolean(FCM_SERVER_KEY),
+          subscriptions: state.pushSubscriptions.filter((item) => !item.revokedAt).length,
+        },
         startedAt: state.startedAt,
         nodes: state.nodes.size,
         authRequired: true,
@@ -716,6 +888,66 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/reports/daily") {
+        if (!isReadAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        const dashboard = dashboardState();
+        writeJson(res, 200, { ok: true, report: dashboard.reports.today, totals: dashboard.totals });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/push/register") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        const body = await readBody(req);
+        const token = String(body.token ?? "").trim();
+        const type = String(body.type ?? "fcm").trim() || "fcm";
+        if (!token) {
+          writeJson(res, 400, { ok: false, error: "Missing push token" });
+          return;
+        }
+        const existing = state.pushSubscriptions.find((item) => item.token === token && item.type === type);
+        if (existing) {
+          existing.revokedAt = null;
+          existing.updatedAt = nowIso();
+          existing.label = body.label ?? existing.label ?? null;
+        } else {
+          state.pushSubscriptions.push({
+            id: randomUUID(),
+            type,
+            token,
+            label: body.label ?? null,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+            revokedAt: null,
+          });
+        }
+        state.pushSubscriptions = state.pushSubscriptions.slice(-200);
+        recordAudit("push.registered", "admin", { type, label: body.label ?? null });
+        persistState();
+        writeJson(res, 200, { ok: true, subscriptions: state.pushSubscriptions.filter((item) => !item.revokedAt).length });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/push/test") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        deliverNotification({
+          type: "test",
+          title: "CodexHub 测试通知",
+          preview: "云端通知通道已触发。",
+          createdAt: nowIso(),
+        }).catch(() => {});
+        writeJson(res, 202, { ok: true, queued: true });
+        return;
+      }
+
       const parts = url.pathname.split("/").filter(Boolean);
       if (parts[0] === "api" && parts[1] === "nodes" && parts[2]) {
         const nodeId = decodeURIComponent(parts[2]);
@@ -800,6 +1032,11 @@ const server = http.createServer(async (req, res) => {
           node.name = body.name ?? node.name ?? nodeId;
           node.tags = Array.isArray(body.tags) ? body.tags : node.tags ?? [];
           node.version = body.version ?? node.version ?? null;
+          node.heartbeatSeq = Number.isFinite(Number(body.heartbeatSeq)) ? Number(body.heartbeatSeq) : node.heartbeatSeq ?? null;
+          node.collectedAt = body.collectedAt ?? null;
+          node.agentStartedAt = body.agentStartedAt ?? node.agentStartedAt ?? null;
+          node.agentLastErrorAt = body.agentLastErrorAt ?? node.agentLastErrorAt ?? null;
+          node.update = body.update ?? node.update ?? null;
           node.host = body.host ?? node.host ?? null;
           const previousLastSeenAt = node.lastSeenAt ?? null;
           node.lastSeenAt = nowIso();
