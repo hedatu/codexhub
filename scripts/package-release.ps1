@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.7",
+  [string]$Version = "0.4.8",
   [string]$FarfieldVersion = "0.2.2"
 )
 
@@ -104,6 +104,17 @@ function Install-FarfieldRuntimePackage($target) {
   }
 }
 
+function Install-WindowsNodeRuntimePackage($target) {
+  $node = Get-Command node.exe -ErrorAction SilentlyContinue
+  if (-not $node) {
+    Write-Warning "node.exe was not found; Windows agent package will not include node-runtime."
+    return
+  }
+  $runtimeDir = Join-Path $target "node-runtime"
+  New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+  Copy-Item -LiteralPath $node.Source -Destination (Join-Path $runtimeDir "node.exe") -Force
+}
+
 $sourceDir = Join-Path $stage "codexhub-source-v$Version"
 Copy-Items $common $sourceDir
 Compress-Archive -Path (Join-Path $sourceDir "*") -DestinationPath (Join-Path $dist "codexhub-source-v$Version.zip") -Force
@@ -145,6 +156,7 @@ Copy-Items @(
   "docs"
 ) $agentDir
 Copy-GoBinaries @("codexhub-agent-windows-*", "codexhub-farfield-windows-*") $agentDir
+Install-WindowsNodeRuntimePackage $agentDir
 Install-FarfieldRuntimePackage $agentDir
 $wrapperSource = Join-Path $root "scripts\windows\codex-wrapper.go"
 $wrapperTargetDir = Join-Path $agentDir "scripts\windows"

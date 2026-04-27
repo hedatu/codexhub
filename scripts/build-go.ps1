@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.6",
+  [string]$Version = "0.4.8",
   [string]$OutputDir = "$PSScriptRoot\..\dist\go"
 )
 

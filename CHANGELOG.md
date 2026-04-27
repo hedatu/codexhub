@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.8
+
+- Added bundled Windows `node-runtime\node.exe` support so Farfield can start on Windows agent installs without a separate Node.js installation.
+- Updated `codexhub-farfield` to prefer packaged Node runtimes before falling back to `NODE_EXE` or system `PATH`.
+- Updated the Windows desktop installer to copy packaged `node-runtime` into `C:\ProgramData\CodexHub`.
+
 ## v0.4.7
 
 - Added a native `codexhub-farfield` launcher so Windows can start the local Farfield server without visible command windows.

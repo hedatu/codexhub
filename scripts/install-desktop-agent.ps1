@@ -27,11 +27,34 @@ $preflight = [ordered]@{
 }
 
 function Resolve-Node {
+  $bundledNode = Join-Path $InstallDir "node-runtime\node.exe"
+  if (Test-Path -LiteralPath $bundledNode) {
+    return $bundledNode
+  }
   $node = Get-Command node.exe -ErrorAction SilentlyContinue
   if (-not $node) {
-    throw "Node.js 20+ is required. Install Node.js first, then rerun this installer."
+    throw "Node.js 20+ is required. Use a packaged CodexHub agent zip with node-runtime, or install Node.js first."
   }
   return $node.Source
+}
+
+function Install-NodeRuntime {
+  param(
+    [string]$SourceRoot,
+    [string]$TargetDir
+  )
+
+  $sourceRuntime = Join-Path $SourceRoot "node-runtime"
+  $targetNode = Join-Path $TargetDir "node.exe"
+  if (Test-Path -LiteralPath $targetNode) {
+    return
+  }
+  if (Test-Path -LiteralPath (Join-Path $sourceRuntime "node.exe")) {
+    Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TargetDir) | Out-Null
+    Copy-Item -LiteralPath $sourceRuntime -Destination $TargetDir -Recurse -Force
+    return
+  }
 }
 
 function Install-FarfieldRuntime {
@@ -81,6 +104,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "src\desktop-ag
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "bin") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "logs") | Out-Null
 $preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $InstallDir "install-preflight.json") -Encoding UTF8
+Install-NodeRuntime -SourceRoot $repoRoot -TargetDir (Join-Path $InstallDir "node-runtime")
 
 $agentExe = Join-Path $InstallDir "bin\codexhub-agent.exe"
 if (Test-Path -LiteralPath $goAgentSource) {

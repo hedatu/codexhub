@@ -18,7 +18,7 @@ func main() {
 
 	codexJs := filepath.Join(appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js")
 	args := append([]string{codexJs}, os.Args[1:]...)
-	cmd := exec.Command("node", args...)
+	cmd := exec.Command(resolveNode(), args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -31,4 +31,21 @@ func main() {
 		os.Stderr.WriteString(err.Error() + "\n")
 		os.Exit(1)
 	}
+}
+
+func resolveNode() string {
+	if node := os.Getenv("NODE_EXE"); node != "" {
+		if _, err := os.Stat(node); err == nil {
+			return node
+		}
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		installDir := filepath.Dir(filepath.Dir(exe))
+		bundled := filepath.Join(installDir, "node-runtime", "node.exe")
+		if _, err := os.Stat(bundled); err == nil {
+			return bundled
+		}
+	}
+	return "node"
 }

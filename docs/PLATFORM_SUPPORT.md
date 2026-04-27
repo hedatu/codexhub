@@ -23,7 +23,7 @@ CodexHub ships native Go binaries:
 - macOS: Intel x64 and Apple Silicon ARM64 agent/server binaries.
 - Linux: x64, ARM64, and x86 agent/server binaries.
 
-Release agent packages include a pinned Farfield runtime under `farfield-runtime/`. The desktop installer starts that local copy through `codexhub-farfield`; it does not download `@farfield/server@latest` at login. Node.js 20+ is still required to execute Farfield's JavaScript runtime.
+Release agent packages include a pinned Farfield runtime under `farfield-runtime/`. The desktop installer starts that local copy through `codexhub-farfield`; it does not download `@farfield/server@latest` at login. Windows agent packages also include `node-runtime\node.exe`, so normal Windows installs do not require a separate Node.js installation. Linux and macOS still use system Node.js unless their packages include a matching `node-runtime/`.
 
 ## Tray companion
 
@@ -49,4 +49,4 @@ The local status window checks three layers:
 - macOS 用 LaunchAgents，优先运行 `codexhub-agent-darwin-*` 和 `codexhub-farfield-darwin-*`。
 - Linux 用 systemd user service，优先运行 `codexhub-agent-linux-*` 和 `codexhub-farfield-linux-*`。
 
-Node.js 版本仍然保留为兜底方案。发布包会内置固定版本的 Farfield runtime，电脑端开机启动时直接运行本地 `farfield-runtime/`，不会再登录时下载 `@farfield/server@latest`。目前 Farfield 仍需要 Node.js 20+ 来执行。
+Node.js 版本仍然保留为兜底方案。发布包会内置固定版本的 Farfield runtime，电脑端开机启动时直接运行本地 `farfield-runtime/`，不会再登录时下载 `@farfield/server@latest`。Windows agent 包还会内置 `node-runtime\node.exe`，正常 Windows 安装不再需要用户单独安装 Node.js；Linux 和 macOS 仍使用系统 Node.js，除非发布包内也放入匹配平台的 `node-runtime/`。

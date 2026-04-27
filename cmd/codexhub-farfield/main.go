@@ -53,7 +53,8 @@ func runFarfield(runtimeDir, port, codexCLI, workDir, logDir string) error {
 	if isPortOpen("127.0.0.1", port) {
 		return nil
 	}
-	node, err := findNode()
+	baseDir := filepath.Dir(filepath.Dir(mustExecutablePath()))
+	node, err := findNode(baseDir)
 	if err != nil {
 		return err
 	}
@@ -90,10 +91,23 @@ func runFarfield(runtimeDir, port, codexCLI, workDir, logDir string) error {
 	return cmd.Run()
 }
 
-func findNode() (string, error) {
+func mustExecutablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return exe
+}
+
+func findNode(baseDir string) (string, error) {
 	if value := strings.TrimSpace(os.Getenv("NODE_EXE")); value != "" {
 		if _, err := os.Stat(value); err == nil {
 			return value, nil
+		}
+	}
+	for _, candidate := range bundledNodeCandidates(baseDir) {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
 		}
 	}
 	names := []string{"node"}
@@ -105,7 +119,27 @@ func findNode() (string, error) {
 			return path, nil
 		}
 	}
-	return "", errors.New("Node.js 20+ is required to run bundled Farfield")
+	return "", errors.New("Node.js 20+ is required to run bundled Farfield; package node-runtime with CodexHub or install Node.js")
+}
+
+func bundledNodeCandidates(baseDir string) []string {
+	if baseDir == "" {
+		return nil
+	}
+	nodeDir := filepath.Join(baseDir, "node-runtime")
+	suffix := runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		return []string{
+			filepath.Join(nodeDir, suffix, "node.exe"),
+			filepath.Join(nodeDir, "node.exe"),
+		}
+	}
+	return []string{
+		filepath.Join(nodeDir, suffix, "bin", "node"),
+		filepath.Join(nodeDir, suffix, "node"),
+		filepath.Join(nodeDir, "bin", "node"),
+		filepath.Join(nodeDir, "node"),
+	}
 }
 
 func isPortOpen(host, port string) bool {
