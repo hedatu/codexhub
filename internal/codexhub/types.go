@@ -90,6 +90,34 @@ type AgentProposal struct {
 	ContextSummary        string   `json:"contextSummary,omitempty"`
 }
 
+type FullThreadContext struct {
+	ThreadID         string          `json:"threadId"`
+	NodeID           string          `json:"nodeId,omitempty"`
+	Mode             string          `json:"mode"`
+	SessionFile      string          `json:"sessionFile,omitempty"`
+	MessageCount     int             `json:"messageCount"`
+	Truncated        bool            `json:"truncated"`
+	Redacted         bool            `json:"redacted"`
+	CollectedAt      string          `json:"collectedAt"`
+	ContextSignature string          `json:"contextSignature,omitempty"`
+	Messages         []ThreadMessage `json:"messages,omitempty"`
+}
+
+type ProposalAuditEntry struct {
+	ID               string        `json:"id"`
+	At               string        `json:"at"`
+	Event            string        `json:"event"`
+	NodeID           string        `json:"nodeId"`
+	ThreadID         string        `json:"threadId"`
+	ProposalID       string        `json:"proposalId"`
+	Actor            string        `json:"actor"`
+	Risk             string        `json:"risk,omitempty"`
+	Decision         string        `json:"decision,omitempty"`
+	CommandID        string        `json:"commandId,omitempty"`
+	ContextSignature string        `json:"contextSignature,omitempty"`
+	Proposal         AgentProposal `json:"proposal,omitempty"`
+}
+
 type Metrics struct {
 	TotalThreads    int `json:"totalThreads"`
 	Running         int `json:"running"`

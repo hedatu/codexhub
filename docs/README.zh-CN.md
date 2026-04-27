@@ -37,7 +37,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-desktop-agent.ps1 `
 Windows Companion 桌面托盘：
 
 ```powershell
-.\codexhub-companion-installer-windows-x64-v0.4.6.exe
+.\codexhub-companion-installer-windows-x64-v0.4.9.exe
 ```
 
 这个安装器会安装 Companion、写入开机启动、创建开始菜单快捷方式，并在 Windows “应用和功能”里提供卸载入口。正式消除 SmartScreen 提示需要真实代码签名证书。
@@ -45,7 +45,7 @@ Windows Companion 桌面托盘：
 安卓 APK：
 
 ```text
-codexhub-android-v0.4.6.apk
+codexhub-android-v0.4.9.apk
 ```
 
 这个 APK 已经签名，可以在 Android 14 上直接安装。服务器也已经配置 `.well-known/assetlinks.json`，用于 TWA 全屏验证。

@@ -1,1 +1,12 @@
-ew0KICAicmVsYXRpb24iOiBbDQogICAgImRlbGVnYXRlX3Blcm1pc3Npb24vY29tbW9uLmhhbmRsZV9hbGxfdXJscyINCiAgXSwNCiAgInRhcmdldCI6IHsNCiAgICAibmFtZXNwYWNlIjogImFuZHJvaWRfYXBwIiwNCiAgICAicGFja2FnZV9uYW1lIjogImNvbS5oZWRhdHUuY29kZXhodWIiLA0KICAgICJzaGEyNTZfY2VydF9maW5nZXJwcmludHMiOiBbDQogICAgICAiOEY6OEU6MjY6NDg6N0E6RjI6RjM6QUY6Rjk6QUI6NDA6ODc6QTM6NkY6OEM6OUU6NjU6OEQ6QTU6ODc6RDg6MzQ6Rjk6OEQ6REM6MDQ6Nzc6Nzc6Nzg6OTU6QkM6NDAiDQogICAgXQ0KICB9DQp9DQo=
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.hedatu.codexhub",
+      "sha256_cert_fingerprints": [
+        "8F:8E:26:48:7A:F2:F3:AF:F9:AB:40:87:A3:6F:8C:9E:65:8D:A5:87:D8:34:F9:8D:DC:04:77:77:78:95:BC:40"
+      ]
+    }
+  }
+]

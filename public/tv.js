@@ -1086,6 +1086,16 @@ function approvalConfirmMessage(thread, draftState) {
   return `请确认你已经阅读 Codex 请求内容、Agent 草稿和策略边界。确认后系统会把当前文本发送给对应 Codex 线程。${reasons}\n\n禁止直接批准 deploy、git push、delete、secret access、database mutation。`;
 }
 
+function proposalActionMetadata(draft, decision) {
+  if (!draft?.proposalId) return {};
+  return {
+    proposalId: draft.proposalId,
+    proposalDecision: decision,
+    proposalRisk: draft.risk || "",
+    proposalContextSignature: draft.contextSignature || draft.contextBundle?.contextSignature || "",
+  };
+}
+
 async function handleModalAction(action) {
   const selected = state.selected;
   if (!selected) return;
@@ -1112,15 +1122,32 @@ async function handleModalAction(action) {
     if (!ok) return;
   }
   if (action === "takeover") {
-    await queueAction(thread.nodeId, { kind: "interrupt", provider: thread.provider || "codex", threadId: thread.id });
+    await queueAction(thread.nodeId, {
+      kind: "interrupt",
+      provider: thread.provider || "codex",
+      threadId: thread.id,
+      ...proposalActionMetadata(draft, "interrupted"),
+    });
   } else if (action === "reject") {
-    await queueAction(thread.nodeId, { kind: "sendMessage", provider: thread.provider || "codex", threadId: thread.id, text: text || "拒绝本次操作，请停止当前高风险动作。" });
+    await queueAction(thread.nodeId, {
+      kind: "sendMessage",
+      provider: thread.provider || "codex",
+      threadId: thread.id,
+      text: text || "拒绝本次操作，请停止当前高风险动作。",
+      ...proposalActionMetadata(draft, "rejected"),
+    });
   } else {
     if (!text) {
       showToast("请输入要发送的内容");
       return;
     }
-    await queueAction(thread.nodeId, { kind: "sendMessage", provider: thread.provider || "codex", threadId: thread.id, text });
+    await queueAction(thread.nodeId, {
+      kind: "sendMessage",
+      provider: thread.provider || "codex",
+      threadId: thread.id,
+      text,
+      ...proposalActionMetadata(draft, action === "approve" ? "approved" : "sent"),
+    });
     state.agentDrafts.delete(thread.nodeIdThreadId);
     state.replyDrafts.delete(thread.nodeIdThreadId);
   }

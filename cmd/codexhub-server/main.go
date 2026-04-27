@@ -64,17 +64,20 @@ type appState struct {
 	clients           map[chan []byte]bool
 	agentSummaries    map[string]codexhub.ThreadContextBundle
 	agentProposals    map[string]codexhub.AgentProposal
+	fullContexts      map[string]codexhub.FullThreadContext
+	proposalAudits    []codexhub.ProposalAuditEntry
 	mu                sync.RWMutex
 }
 
 type persistedState struct {
-	SavedAt           string                      `json:"savedAt"`
-	SchemaVersion     int                         `json:"schemaVersion,omitempty"`
-	StorageDriver     string                      `json:"storageDriver,omitempty"`
-	InstallKey        string                      `json:"installKey,omitempty"`
-	AuditLogs         []codexhub.AuditEntry       `json:"auditLogs"`
-	PushSubscriptions []codexhub.PushSubscription `json:"pushSubscriptions,omitempty"`
-	Nodes             []codexhub.Node             `json:"nodes"`
+	SavedAt           string                        `json:"savedAt"`
+	SchemaVersion     int                           `json:"schemaVersion,omitempty"`
+	StorageDriver     string                        `json:"storageDriver,omitempty"`
+	InstallKey        string                        `json:"installKey,omitempty"`
+	AuditLogs         []codexhub.AuditEntry         `json:"auditLogs"`
+	ProposalAudits    []codexhub.ProposalAuditEntry `json:"proposalAudits,omitempty"`
+	PushSubscriptions []codexhub.PushSubscription   `json:"pushSubscriptions,omitempty"`
+	Nodes             []codexhub.Node               `json:"nodes"`
 }
 
 type server struct {
@@ -97,6 +100,7 @@ func main() {
 		clients:        map[chan []byte]bool{},
 		agentSummaries: map[string]codexhub.ThreadContextBundle{},
 		agentProposals: map[string]codexhub.AgentProposal{},
+		fullContexts:   map[string]codexhub.FullThreadContext{},
 	}
 	s := &server{cfg: cfg, state: state}
 	if err := s.loadState(); err != nil {
@@ -729,6 +733,12 @@ func (s *server) handleNodeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleQueueAction(w, r, nodeID)
 	case r.Method == http.MethodPost && action == "threads" && len(parts) >= 6 && parts[5] == "agent-draft":
 		s.handleAgentDraft(w, r, nodeID, parts[4])
+	case r.Method == http.MethodGet && action == "threads" && len(parts) >= 6 && parts[5] == "context-bundle":
+		s.handleThreadContextBundle(w, r, nodeID, parts[4])
+	case r.Method == http.MethodPost && action == "threads" && len(parts) >= 6 && parts[5] == "context-request":
+		s.handleThreadContextRequest(w, r, nodeID, parts[4])
+	case r.Method == http.MethodGet && action == "threads" && len(parts) >= 6 && parts[5] == "proposals":
+		s.handleThreadProposals(w, r, nodeID, parts[4])
 	case r.Method == http.MethodPost && action == "notifications" && len(parts) >= 5 && parts[4] == "read":
 		s.handleNotificationsRead(w, r, nodeID)
 	case r.Method == http.MethodGet && action == "commands" && len(parts) >= 5 && parts[4] == "poll":
@@ -917,6 +927,20 @@ func (s *server) handleQueueAction(w http.ResponseWriter, r *http.Request, nodeI
 	node := s.getOrCreateNodeLocked(nodeID)
 	node.Commands = append(node.Commands, command)
 	s.cleanupCommandsLocked(node)
+	if proposalID := stringValue(action["proposalId"]); proposalID != "" {
+		proposal := s.state.agentProposals[proposalID]
+		if proposal.ProposalID == "" {
+			proposal = codexhub.AgentProposal{
+				ProposalID:       proposalID,
+				ThreadID:         stringValue(action["threadId"]),
+				NodeID:           nodeID,
+				Risk:             stringValue(action["proposalRisk"]),
+				ContextSignature: stringValue(action["proposalContextSignature"]),
+			}
+		}
+		decision := firstNonEmptyString(stringValue(action["proposalDecision"]), "queued")
+		s.recordProposalAuditLocked(decision, "admin", nodeID, stringValue(action["threadId"]), proposal, command.ID, decision)
+	}
 	s.recordAuditLocked("command.queued", "admin", map[string]any{"nodeId": nodeID, "commandId": command.ID, "kind": kind, "threadId": action["threadId"]})
 	s.state.mu.Unlock()
 	s.persistState()
@@ -954,6 +978,7 @@ func (s *server) handleAgentDraft(w http.ResponseWriter, r *http.Request, nodeID
 	contextBundle := s.buildThreadContextBundleLocked(node, thread)
 	proposal := buildAgentProposal(contextBundle, body)
 	s.state.agentProposals[proposal.ProposalID] = proposal
+	s.recordProposalAuditLocked("created", "admin", nodeID, threadID, proposal, "", "")
 	if len(s.state.agentProposals) > 200 {
 		for key := range s.state.agentProposals {
 			delete(s.state.agentProposals, key)
@@ -971,6 +996,117 @@ func (s *server) handleAgentDraft(w http.ResponseWriter, r *http.Request, nodeID
 	s.persistState()
 	s.sendEvent(map[string]any{"type": "agentProposalCreated", "nodeId": nodeID, "threadId": threadID, "proposal": proposal, "contextBundle": contextBundle})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "proposal": proposal, "contextBundle": contextBundle})
+}
+
+func (s *server) handleThreadContextBundle(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
+	mode := strings.ToLower(firstNonEmptyString(r.URL.Query().Get("mode"), "compressed"))
+	if mode == "full" {
+		if !s.isAdminAuthed(r) {
+			writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+			return
+		}
+	} else if !s.isReadAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	threadID := decodedPathPart(encodedThreadID)
+	s.state.mu.Lock()
+	node := s.state.nodes[nodeID]
+	if node == nil {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Node not found"))
+		return
+	}
+	thread, ok := findThread(node.Threads, threadID)
+	if !ok {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Thread not found"))
+		return
+	}
+	contextBundle := s.buildThreadContextBundleLocked(node, thread)
+	if mode != "full" {
+		s.recordAuditLocked("thread.context.read", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "compressed", "contextSignature": contextBundle.ContextSignature})
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "compressed", "status": "ready", "contextBundle": contextBundle})
+		return
+	}
+	fullContext, ready := s.state.fullContexts[contextKey(nodeID, threadID)]
+	if ready {
+		s.recordAuditLocked("thread.context.read", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "full", "contextSignature": fullContext.ContextSignature})
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "full", "status": "ready", "contextBundle": contextBundle, "fullContext": fullContext})
+		return
+	}
+	s.recordAuditLocked("thread.context.read.miss", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "full"})
+	s.state.mu.Unlock()
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "mode": "full", "status": "not_ready", "contextBundle": contextBundle, "message": "Full context has not been collected. POST context-request first."})
+}
+
+func (s *server) handleThreadContextRequest(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	threadID := decodedPathPart(encodedThreadID)
+	var body map[string]any
+	_ = readJSON(r, &body)
+	maxMessages := clamp(intFromAny(firstNonZero(body["maxMessages"], body["limit"]), 200), 1, 2000)
+	maxChars := clamp(intFromAny(body["maxChars"], 240000), 1000, 2_000_000)
+	s.state.mu.Lock()
+	node := s.state.nodes[nodeID]
+	if node == nil {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Node not found"))
+		return
+	}
+	thread, ok := findThread(node.Threads, threadID)
+	if !ok {
+		s.state.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, errorBody("Thread not found"))
+		return
+	}
+	contextBundle := s.buildThreadContextBundleLocked(node, thread)
+	action := map[string]any{
+		"kind":        "readThreadContext",
+		"provider":    firstNonEmptyString(thread.Provider, "codex"),
+		"threadId":    threadID,
+		"mode":        "full",
+		"maxMessages": maxMessages,
+		"maxChars":    maxChars,
+		"redact":      true,
+	}
+	command := codexhub.Command{ID: uuid(), Status: "queued", CreatedAt: nowISO(), Action: action}
+	node.Commands = append(node.Commands, command)
+	s.cleanupCommandsLocked(node)
+	s.recordAuditLocked("thread.context.requested", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "commandId": command.ID, "mode": "full", "maxMessages": maxMessages, "maxChars": maxChars, "contextSignature": contextBundle.ContextSignature})
+	s.state.mu.Unlock()
+	s.persistState()
+	s.sendEvent(map[string]any{"type": "commandQueued", "nodeId": nodeID, "command": command})
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "mode": "full", "status": "queued", "command": command, "contextBundle": contextBundle})
+}
+
+func (s *server) handleThreadProposals(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	threadID := decodedPathPart(encodedThreadID)
+	s.state.mu.RLock()
+	audits := []codexhub.ProposalAuditEntry{}
+	for i := len(s.state.proposalAudits) - 1; i >= 0; i-- {
+		entry := s.state.proposalAudits[i]
+		if entry.NodeID == nodeID && entry.ThreadID == threadID {
+			audits = append(audits, entry)
+		}
+	}
+	proposals := []codexhub.AgentProposal{}
+	for _, proposal := range s.state.agentProposals {
+		if proposal.NodeID == nodeID && proposal.ThreadID == threadID {
+			proposals = append(proposals, proposal)
+		}
+	}
+	s.state.mu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "nodeId": nodeID, "threadId": threadID, "proposals": proposals, "audits": audits})
 }
 
 func (s *server) handlePoll(w http.ResponseWriter, r *http.Request, nodeID string) {
@@ -1018,6 +1154,16 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 			cmd := node.Commands[i]
 			var newNotice codexhub.Notification
 			notify := false
+			if stringValue(cmd.Action["kind"]) == "readThreadContext" {
+				if cmd.Status == "done" {
+					if fullContext, ok := fullContextFromCommandResult(nodeID, stringValue(cmd.Action["threadId"]), body); ok {
+						s.state.fullContexts[contextKey(nodeID, fullContext.ThreadID)] = fullContext
+						s.recordAuditLocked("thread.context.ready", "node", map[string]any{"nodeId": nodeID, "threadId": fullContext.ThreadID, "commandId": commandID, "messageCount": fullContext.MessageCount, "truncated": fullContext.Truncated, "redacted": fullContext.Redacted, "contextSignature": fullContext.ContextSignature})
+					}
+				} else {
+					s.recordAuditLocked("thread.context.failed", "node", map[string]any{"nodeId": nodeID, "threadId": stringValue(cmd.Action["threadId"]), "commandId": commandID, "error": stringValue(body["error"])})
+				}
+			}
 			if cmd.Status == "failed" && stringValue(cmd.Action["threadId"]) != "" {
 				newNotice, notify = addNodeNotificationLocked(node, codexhub.Notification{
 					Type:            "commandFailed",
@@ -1705,6 +1851,72 @@ func buildAgentProposal(bundle codexhub.ThreadContextBundle, body map[string]any
 	}
 }
 
+func decodedPathPart(value string) string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+func contextKey(nodeID, threadID string) string {
+	return nodeID + ":" + threadID
+}
+
+func intFromAny(value any, fallback int) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return int(n)
+		}
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func fullContextFromCommandResult(nodeID, fallbackThreadID string, body map[string]any) (codexhub.FullThreadContext, bool) {
+	result, ok := body["result"].(map[string]any)
+	if !ok {
+		return codexhub.FullThreadContext{}, false
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return codexhub.FullThreadContext{}, false
+	}
+	var fullContext codexhub.FullThreadContext
+	if err := json.Unmarshal(data, &fullContext); err != nil {
+		return codexhub.FullThreadContext{}, false
+	}
+	if fullContext.ThreadID == "" {
+		fullContext.ThreadID = fallbackThreadID
+	}
+	if fullContext.ThreadID == "" {
+		return codexhub.FullThreadContext{}, false
+	}
+	fullContext.NodeID = nodeID
+	if fullContext.Mode == "" {
+		fullContext.Mode = "full"
+	}
+	if fullContext.CollectedAt == "" {
+		fullContext.CollectedAt = nowISO()
+	}
+	if fullContext.MessageCount == 0 {
+		fullContext.MessageCount = len(fullContext.Messages)
+	}
+	return fullContext, true
+}
+
 func (s *server) installProfile(r *http.Request) map[string]any {
 	base := s.publicBaseURL(r)
 	installKey := s.currentInstallKey()
@@ -1830,6 +2042,10 @@ func (s *server) loadState() error {
 		payload.AuditLogs = payload.AuditLogs[len(payload.AuditLogs)-500:]
 	}
 	s.state.auditLogs = payload.AuditLogs
+	if len(payload.ProposalAudits) > 500 {
+		payload.ProposalAudits = payload.ProposalAudits[len(payload.ProposalAudits)-500:]
+	}
+	s.state.proposalAudits = payload.ProposalAudits
 	if len(payload.PushSubscriptions) > 200 {
 		payload.PushSubscriptions = payload.PushSubscriptions[len(payload.PushSubscriptions)-200:]
 	}
@@ -1848,6 +2064,7 @@ func (s *server) persistState() {
 		StorageDriver:     s.cfg.StorageDriver,
 		InstallKey:        s.state.installKey,
 		AuditLogs:         append([]codexhub.AuditEntry(nil), s.state.auditLogs...),
+		ProposalAudits:    append([]codexhub.ProposalAuditEntry(nil), s.state.proposalAudits...),
 		PushSubscriptions: append([]codexhub.PushSubscription(nil), s.state.pushSubscriptions...),
 	}
 	for _, node := range s.state.nodes {
@@ -1894,6 +2111,10 @@ func (s *server) applyPersistedState(payload persistedState) {
 		payload.AuditLogs = payload.AuditLogs[len(payload.AuditLogs)-500:]
 	}
 	s.state.auditLogs = payload.AuditLogs
+	if len(payload.ProposalAudits) > 500 {
+		payload.ProposalAudits = payload.ProposalAudits[len(payload.ProposalAudits)-500:]
+	}
+	s.state.proposalAudits = payload.ProposalAudits
 	if len(payload.PushSubscriptions) > 200 {
 		payload.PushSubscriptions = payload.PushSubscriptions[len(payload.PushSubscriptions)-200:]
 	}
@@ -2033,6 +2254,36 @@ func (s *server) recordAuditLocked(kind, actor string, details map[string]any) {
 	s.state.auditLogs = append(s.state.auditLogs, codexhub.AuditEntry{ID: uuid(), At: nowISO(), Type: kind, Actor: actor, Details: details})
 	if len(s.state.auditLogs) > 500 {
 		s.state.auditLogs = s.state.auditLogs[len(s.state.auditLogs)-500:]
+	}
+}
+
+func (s *server) recordProposalAuditLocked(event, actor, nodeID, threadID string, proposal codexhub.AgentProposal, commandID, decision string) {
+	if proposal.ProposalID == "" {
+		return
+	}
+	if threadID == "" {
+		threadID = proposal.ThreadID
+	}
+	if nodeID == "" {
+		nodeID = proposal.NodeID
+	}
+	entry := codexhub.ProposalAuditEntry{
+		ID:               uuid(),
+		At:               nowISO(),
+		Event:            event,
+		NodeID:           nodeID,
+		ThreadID:         threadID,
+		ProposalID:       proposal.ProposalID,
+		Actor:            actor,
+		Risk:             proposal.Risk,
+		Decision:         decision,
+		CommandID:        commandID,
+		ContextSignature: proposal.ContextSignature,
+		Proposal:         proposal,
+	}
+	s.state.proposalAudits = append(s.state.proposalAudits, entry)
+	if len(s.state.proposalAudits) > 500 {
+		s.state.proposalAudits = s.state.proposalAudits[len(s.state.proposalAudits)-500:]
 	}
 }
 

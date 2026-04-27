@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -262,6 +264,12 @@ func (a *app) executeCommand(command codexhub.Command) (any, error) {
 	case "refresh":
 		sessionFileIndex = nil
 		return map[string]any{"ok": true, "skipped": false, "message": "refresh acknowledged"}, nil
+	case "readThreadContext":
+		threadID := stringValue(command.Action["threadId"])
+		if threadID == "" {
+			return nil, errors.New("readThreadContext requires threadId")
+		}
+		return readFullSessionContext(threadID, clamp(intFromAny(first(command.Action, "maxMessages", "limit"), 200), 1, 2000), clamp(intFromAny(command.Action["maxChars"], 240000), 1000, 2_000_000), boolValue(command.Action["redact"]))
 	case "sendMessage", "interrupt", "submitUserInput":
 		return a.forwardUnifiedCommand(command.Action)
 	default:
@@ -517,6 +525,104 @@ func readLatestSessionMessage(threadID string) codexhub.Thread {
 	return thread
 }
 
+func readFullSessionContext(threadID string, maxMessages int, maxChars int, redact bool) (codexhub.FullThreadContext, error) {
+	filePath := sessionFileForThread(threadID)
+	if filePath == "" {
+		return codexhub.FullThreadContext{}, fmt.Errorf("session file not found for thread %s", threadID)
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return codexhub.FullThreadContext{}, err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	messages := []codexhub.ThreadMessage{}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		decoder := json.NewDecoder(strings.NewReader(line))
+		decoder.UseNumber()
+		if err := decoder.Decode(&event); err != nil {
+			continue
+		}
+		payload, _ := event["payload"].(map[string]any)
+		extracted := extractSessionMessage(payload)
+		if extracted == nil || strings.TrimSpace(extracted.Text) == "" {
+			continue
+		}
+		text := extracted.Text
+		if redact {
+			text = redactSensitiveText(text)
+		}
+		messages = append(messages, codexhub.ThreadMessage{Text: text, At: event["timestamp"], Phase: stringValue(payload["phase"]), Role: extracted.Role})
+	}
+	truncated := false
+	if len(messages) > maxMessages {
+		messages = messages[len(messages)-maxMessages:]
+		truncated = true
+	}
+	totalChars := 0
+	start := len(messages)
+	for start > 0 {
+		size := len([]rune(messages[start-1].Text))
+		if totalChars+size > maxChars && start < len(messages) {
+			break
+		}
+		if totalChars+size > maxChars && start == len(messages) {
+			messages[start-1].Text = string([]rune(messages[start-1].Text)[:maxChars])
+			totalChars = maxChars
+			start--
+			truncated = true
+			break
+		}
+		totalChars += size
+		start--
+	}
+	if start > 0 {
+		messages = messages[start:]
+		truncated = true
+	}
+	return codexhub.FullThreadContext{
+		ThreadID:         threadID,
+		Mode:             "full",
+		SessionFile:      filepath.Base(filePath),
+		MessageCount:     len(messages),
+		Truncated:        truncated,
+		Redacted:         redact,
+		CollectedAt:      time.Now().UTC().Format(time.RFC3339),
+		ContextSignature: fullContextSignature(threadID, messages),
+		Messages:         messages,
+	}, nil
+}
+
+func fullContextSignature(threadID string, messages []codexhub.ThreadMessage) string {
+	hash := sha256.New()
+	_, _ = fmt.Fprintf(hash, "%s", threadID)
+	for _, message := range messages {
+		_, _ = fmt.Fprintf(hash, "|%v|%s|%s|%s", message.At, message.Role, message.Phase, message.Text)
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))[:20]
+}
+
+var secretRedactors = []struct {
+	re          *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*['"]?[^'"\s,}]+`), "$1=[REDACTED]"},
+	{regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]{12,}`), "Bearer [REDACTED]"},
+	{regexp.MustCompile(`sk-[a-zA-Z0-9_-]{12,}`), "sk-[REDACTED]"},
+}
+
+func redactSensitiveText(text string) string {
+	out := text
+	for _, redactor := range secretRedactors {
+		out = redactor.re.ReplaceAllString(out, redactor.replacement)
+	}
+	return out
+}
+
 func reverseThreadMessages(messages []codexhub.ThreadMessage) []codexhub.ThreadMessage {
 	out := append([]codexhub.ThreadMessage(nil), messages...)
 	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
@@ -713,6 +819,38 @@ func first(m map[string]any, keys ...string) any {
 		}
 	}
 	return nil
+}
+
+func intFromAny(value any, fallback int) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return int(n)
+		}
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func clamp(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 func anySlice(value any) []any {
