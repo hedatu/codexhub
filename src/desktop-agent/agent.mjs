@@ -19,13 +19,25 @@ const INSTALL_KEY = config.installKey ?? process.env.CODEXHUB_INSTALL_KEY ?? sav
 const FARFIELD_URL = stripSlash(config.farfield ?? process.env.FARFIELD_URL ?? savedConfig.farfieldUrl ?? "http://127.0.0.1:4311");
 const INTERVAL_MS = Number(config.interval ?? process.env.CODEXHUB_INTERVAL_MS ?? 5_000);
 const PROVIDER = config.provider ?? process.env.CODEXHUB_PROVIDER ?? "codex";
-const AGENT_VERSION = "0.4.5";
+const AGENT_VERSION = "0.4.6";
 const AGENT_STARTED_AT = new Date().toISOString();
 const CODEX_HOME = path.resolve(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
 const SESSION_ROOT = path.join(CODEX_HOME, "sessions");
 const SESSION_CACHE = new Map();
 let sessionFileIndex = null;
 let heartbeatSeq = 0;
+const LOCK_PATH = path.join(path.dirname(CONFIG_PATH), `agent-${safeFileName(NODE_ID)}.lock`);
+const lockHandle = acquireSingleInstanceLock(LOCK_PATH);
+
+process.on("exit", releaseSingleInstanceLock);
+process.on("SIGINT", () => {
+  releaseSingleInstanceLock();
+  process.exit(130);
+});
+process.on("SIGTERM", () => {
+  releaseSingleInstanceLock();
+  process.exit(143);
+});
 
 function parseArgs(args) {
   const out = {};
@@ -41,6 +53,52 @@ function parseArgs(args) {
 
 function stripSlash(value) {
   return String(value).replace(/\/+$/, "");
+}
+
+function safeFileName(value) {
+  return String(value || "default").replace(/[^a-z0-9_.-]+/gi, "_").slice(0, 80) || "default";
+}
+
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireSingleInstanceLock(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  try {
+    const handle = fs.openSync(filePath, "wx");
+    fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), configPath: CONFIG_PATH }));
+    return handle;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const existing = readAgentConfig(filePath);
+    if (pidIsAlive(Number(existing.pid))) {
+      console.error(`CodexHub desktop agent is already running as PID ${existing.pid}. Exiting duplicate instance.`);
+      process.exit(0);
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch {}
+    const handle = fs.openSync(filePath, "wx");
+    fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), configPath: CONFIG_PATH }));
+    return handle;
+  }
+}
+
+function releaseSingleInstanceLock() {
+  try {
+    if (lockHandle != null) fs.closeSync(lockHandle);
+  } catch {}
+  try {
+    const existing = readAgentConfig(LOCK_PATH);
+    if (Number(existing.pid) === process.pid) fs.unlinkSync(LOCK_PATH);
+  } catch {}
 }
 
 function readAgentConfig(filePath) {

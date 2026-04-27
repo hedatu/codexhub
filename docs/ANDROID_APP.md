@@ -14,7 +14,7 @@ CodexHub is already a PWA. The Android app should be packaged as a Trusted Web A
 
 ```bash
 npm install -g @bubblewrap/cli
-powershell -ExecutionPolicy Bypass -File ./scripts/build-android-twa.ps1 -Version 0.4.5
+powershell -ExecutionPolicy Bypass -File ./scripts/build-android-twa.ps1 -Version 0.4.6
 ```
 
 For Play Store distribution, build an AAB. For direct installation on your own phones, an APK is enough.
@@ -22,7 +22,7 @@ For Play Store distribution, build an AAB. For direct installation on your own p
 The direct-install APK is emitted as:
 
 ```text
-dist/codexhub-android-v0.4.5.apk
+dist/codexhub-android-v0.4.6.apk
 ```
 
 ## Server file required
@@ -46,7 +46,7 @@ CodexHub 手机端本质上已经是 PWA。安卓 App 推荐用 TWA 打包：APK
 直装 APK 输出位置：
 
 ```text
-dist/codexhub-android-v0.4.5.apk
+dist/codexhub-android-v0.4.6.apk
 ```
 
 本地签名密钥和密码文件在 `dist/android/` 下，后续升级 APK 必须保留同一套密钥。

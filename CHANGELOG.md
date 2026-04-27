@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.6
+
+- Fixed Windows Companion auto-repair starting duplicate desktop agents when scheduled tasks are missing.
+- Added a Node desktop-agent single-instance lock so duplicate agent processes exit immediately.
+- Updated Windows manual fallback to prefer the native Go agent executable over `node.exe`.
+- Built Windows Go agent binaries as GUI-subsystem executables to avoid visible command windows.
+- Hid the Farfield scheduled PowerShell window with `-WindowStyle Hidden`.
+
 ## v0.4.5
 
 - Added SQLite persistence for the cloud server, enabled by `CODEXHUB_STORAGE=sqlite`.

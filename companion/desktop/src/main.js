@@ -409,10 +409,10 @@ async function windowsCodexHubProcesses() {
   if (!result.ok || !result.stdout.trim()) return [];
   try {
     return [JSON.parse(result.stdout)].flat().map((row) => ({
-      processId: row.processId,
+      processId: Number(row.processId) || null,
       name: row.name || "",
       commandLine: row.commandLine || "",
-    }));
+    })).filter((row) => row.processId && row.commandLine);
   } catch {
     return [];
   }
@@ -560,9 +560,12 @@ async function queryStatus() {
 
 async function startServices() {
   if (process.platform === "win32") {
+    const details = await serviceDetails().catch(() => []);
     for (const task of WINDOWS_TASKS) {
+      const existing = details.find((service) => service.name === task);
+      if (existing && serviceOk(existing)) continue;
       const result = await run("schtasks.exe", ["/Run", "/TN", task]);
-      if (!result.ok) startWindowsManualService(task);
+      if (!result.ok) await startWindowsManualService(task);
     }
   } else if (process.platform === "darwin") {
     for (const label of MACOS_LABELS) {
@@ -615,12 +618,31 @@ async function stopServices() {
   await refresh();
 }
 
-function startWindowsManualService(task) {
+async function windowsManualServiceRunning(task) {
+  const processes = await windowsCodexHubProcesses();
+  if (task === "CodexHubFarfield") {
+    return processes.some((process) => /@farfield[\\/]server|@farfield\/server|PORT\s*=\s*['"]?4311|127\.0\.0\.1:4311/i.test(process.commandLine));
+  }
+  return processes.some((process) => /codexhub-agent|desktop-agent[\\/]agent\.mjs|desktop-agent\\agent\.mjs/i.test(process.commandLine));
+}
+
+async function startWindowsManualService(task) {
+  if (await windowsManualServiceRunning(task)) return;
   if (task === "CodexHubFarfield") {
     const wrapperPath = path.join(installDir(), "codex-wrapper.exe");
     const command = `$env:CODEX_CLI_PATH = '${wrapperPath}'; $env:PORT = '4311'; Set-Location '${process.env.CODEXHUB_FARFIELD_CWD || "C:\\codex"}'; & npx.cmd -y '@farfield/server@latest'`;
     spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], {
       cwd: process.env.CODEXHUB_FARFIELD_CWD || "C:\\codex",
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
+    return;
+  }
+  const agentExe = path.join(installDir(), "bin", "codexhub-agent.exe");
+  if (fs.existsSync(agentExe)) {
+    spawn(agentExe, ["--config", configPath()], {
+      cwd: installDir(),
       detached: true,
       stdio: "ignore",
       windowsHide: true,

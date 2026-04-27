@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.5",
+  [string]$Version = "0.4.6",
   [string]$OutputDir = "$PSScriptRoot\..\dist\go"
 )
 
@@ -29,7 +29,11 @@ foreach ($target in $targets) {
 
   $suffix = "$($target.GOOS)-$($target.GOARCH)$($target.Ext)"
   go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $OutputDir "codexhub-server-$suffix") ./cmd/codexhub-server
-  go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $OutputDir "codexhub-agent-$suffix") ./cmd/codexhub-agent
+  $agentLdflags = "-s -w -X main.version=$Version"
+  if ($target.GOOS -eq "windows") {
+    $agentLdflags = "$agentLdflags -H=windowsgui"
+  }
+  go build -trimpath -ldflags $agentLdflags -o (Join-Path $OutputDir "codexhub-agent-$suffix") ./cmd/codexhub-agent
 }
 
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue

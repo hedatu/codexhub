@@ -97,7 +97,7 @@ if (-not $NoScheduledTask) {
       throw "Cannot find scripts\windows\codex-wrapper.exe. Use the packaged Windows agent zip or run with -NoFarfield."
     }
     $farfieldCommand = "`$env:CODEX_CLI_PATH = '$wrapperPath'; `$env:PORT = '4311'; Set-Location '$env:USERPROFILE'; & npx.cmd -y '@farfield/server@latest'"
-    $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -Command $farfieldCommand"
+    $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command $farfieldCommand"
     $farfieldTrigger = New-ScheduledTaskTrigger -AtLogOn
     Register-ScheduledTask -TaskName "CodexHubFarfield" -Action $farfieldAction -Trigger $farfieldTrigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName "CodexHubFarfield" -ErrorAction Stop
