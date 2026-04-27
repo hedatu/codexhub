@@ -1,13 +1,17 @@
 param(
   [string]$Manifest = "$PSScriptRoot\..\android\twa-manifest.json",
   [string]$OutputDir = "$PSScriptRoot\..\dist\android",
-  [string]$Version = "0.4.6",
-  [string]$ApkOutput = "$PSScriptRoot\..\dist\codexhub-android-v0.4.6.apk",
+  [string]$Version = "0.4.7",
+  [string]$ApkOutput = "",
   [string]$KeyPassword = $env:CODEXHUB_ANDROID_KEY_PASSWORD,
   [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ApkOutput) {
+  $ApkOutput = "$PSScriptRoot\..\dist\codexhub-android-v$Version.apk"
+}
 
 function Resolve-CommandOrNull($Name) {
   $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -97,6 +101,8 @@ Keep this file and keystore. Future APK upgrades must use the same keystore.
 
 $manifestObject = Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
 $manifestObject.signingKey.path = "./codexhub-release.keystore"
+$manifestObject.appVersionName = $Version
+$manifestObject.appVersionCode = [int]($Version -replace "\D", "")
 $manifestObject | Add-Member -NotePropertyName generatorApp -NotePropertyValue "bubblewrap-cli" -Force
 $projectManifest = Join-Path $projectDir "twa-manifest.json"
 Write-Utf8NoBom $projectManifest ($manifestObject | ConvertTo-Json -Depth 20)

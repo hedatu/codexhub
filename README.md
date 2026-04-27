@@ -110,7 +110,7 @@ bash ./scripts/install-macos-agent.sh \
 
 Android app:
 
-CodexHub can be packaged as a Trusted Web Activity. The release includes a direct-install APK: `codexhub-android-v0.4.7.apk`. See `docs/ANDROID_APP.md` and `android/twa-manifest.json`.
+CodexHub can be packaged as a Trusted Web Activity. The current direct-install APK remains `codexhub-android-v0.4.6.apk`; the app shell opens the live web console, so web-side CodexHub updates apply without rebuilding the APK. See `docs/ANDROID_APP.md` and `android/twa-manifest.json`.
 
 Tray companion:
 
@@ -166,7 +166,7 @@ Release assets:
 - `codexhub-macos-agent-v0.4.7.zip`
 - `codexhub-go-binaries-v0.4.7.zip`
 - `codexhub-android-twa-v0.4.7.zip`
-- `codexhub-android-v0.4.7.apk`
+- `codexhub-android-v0.4.6.apk`
 - `codexhub-companion-v0.4.7.zip`
 - `codexhub-companion-windows-x64-v0.4.7.zip`
 - `codexhub-companion-installer-windows-x64-v0.4.7.exe`
@@ -284,7 +284,7 @@ bash ./scripts/install-macos-agent.sh \
 
 安卓 App：
 
-CodexHub 可以打包为 TWA 安卓应用。本版本已经提供可直接安装的 APK：`codexhub-android-v0.4.7.apk`。配置在 `android/twa-manifest.json`，说明见 `docs/ANDROID_APP.md`。
+CodexHub 可以打包为 TWA 安卓应用。当前可直接安装的 APK 仍是 `codexhub-android-v0.4.6.apk`；这个 APK 打开的是线上 Web 控制台，所以网页端更新后 App 内也会同步生效。配置在 `android/twa-manifest.json`，说明见 `docs/ANDROID_APP.md`。
 
 托盘伴随程序：
 
@@ -340,7 +340,7 @@ Release 包：
 - `codexhub-macos-agent-v0.4.7.zip`
 - `codexhub-go-binaries-v0.4.7.zip`
 - `codexhub-android-twa-v0.4.7.zip`
-- `codexhub-android-v0.4.7.apk`
+- `codexhub-android-v0.4.6.apk`
 - `codexhub-companion-v0.4.7.zip`
 - `codexhub-companion-windows-x64-v0.4.7.zip`
 - `codexhub-companion-installer-windows-x64-v0.4.7.exe`
