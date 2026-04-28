@@ -129,6 +129,17 @@ if (Test-Path -LiteralPath $wrapperSource) {
 }
 
 $configPath = Join-Path $InstallDir "agent.json"
+$existingConfig = $null
+if (Test-Path -LiteralPath $configPath) {
+  try {
+    $existingConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+  } catch {
+    $backupPath = "$configPath.bak-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
+    Write-Warning "Existing agent config could not be parsed and was backed up to $backupPath"
+    $existingConfig = @{}
+  }
+}
 $config = [ordered]@{
   server = $Server.TrimEnd("/")
   installKey = $InstallKey
@@ -136,7 +147,15 @@ $config = [ordered]@{
   nodeName = $NodeName
   farfieldUrl = $FarfieldUrl.TrimEnd("/")
   provider = "codex"
-  installedAt = (Get-Date).ToUniversalTime().ToString("o")
+  nodeKey = $existingConfig.nodeKey
+  enrolledAt = $existingConfig.enrolledAt
+  installedAt = if ($existingConfig -and $existingConfig.installedAt) { $existingConfig.installedAt } else { (Get-Date).ToUniversalTime().ToString("o") }
+  updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+}
+$config.Keys.Clone() | ForEach-Object {
+  if ($null -eq $config[$_] -or $config[$_] -eq "") {
+    $config.Remove($_)
+  }
 }
 $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
 

@@ -58,6 +58,7 @@ const state = {
   opsLastCheckedAt: 0,
   operationMode: true,
   lastError: "",
+  authRejected: false,
   refreshInFlight: false,
   viewportTier: viewportTier(),
   mobileEditing: false,
@@ -171,6 +172,7 @@ const TRANSLATIONS = {
     "sync.live": "实时 {time}",
     "sync.eventFormatError": "实时事件格式异常，轮询中",
     "sync.disconnected": "实时连接断开，轮询中",
+    "sync.unauthorized": "访问令牌无效，请重新登录",
     "device.online": "在线",
     "device.busy": "忙碌",
     "device.offline": "离线",
@@ -370,6 +372,7 @@ const TRANSLATIONS = {
     "sync.live": "live {time}",
     "sync.eventFormatError": "Malformed live event, polling",
     "sync.disconnected": "Live connection closed, polling",
+    "sync.unauthorized": "Invalid access token. Please sign in again.",
     "device.online": "Online",
     "device.busy": "Busy",
     "device.offline": "Offline",
@@ -550,11 +553,12 @@ function saveConfig(config) {
     server: String(config.server || window.location.origin).replace(/\/+$/, ""),
     token: String(config.token || ""),
   };
+  state.authRejected = false;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
 }
 
 function isConfigured() {
-  return state.mockMode || Boolean(state.config.server && state.config.token);
+  return state.mockMode || Boolean(state.config.server && state.config.token && !state.authRejected);
 }
 
 function apiUrl(path) {
@@ -572,7 +576,12 @@ async function apiFetch(path, init = {}) {
   });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
+  if (!response.ok) {
+    const error = new Error(payload.error || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
   return payload;
 }
 
@@ -998,6 +1007,9 @@ function render() {
     dom.timeline.classList.add("hidden");
     dom.serverInput.value = state.config.server || window.location.origin;
     dom.tokenInput.value = state.config.token || "";
+    if (state.authRejected) {
+      dom.tokenInput.focus();
+    }
     return;
   }
 
@@ -2094,8 +2106,8 @@ async function loadState() {
     state.dashboard = mockDashboard();
     state.updateStatus = {
       ok: true,
-      currentVersion: "0.5.0",
-      latestVersion: "0.5.0",
+      currentVersion: "0.5.1",
+      latestVersion: "0.5.1",
       updateAvailable: true,
     };
     state.opsLastCheckedAt = Date.now();
@@ -2110,7 +2122,17 @@ async function loadState() {
     render();
     connectEvents();
   } catch (error) {
-    state.lastError = error.message;
+    if (error.status === 401 || error.status === 403) {
+      state.authRejected = true;
+      state.dashboard = null;
+      state.lastError = t("sync.unauthorized");
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    } else {
+      state.lastError = error.message;
+    }
     render();
   }
 }

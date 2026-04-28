@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.1
+
+- Fixed the TV wall unauthorized state so an invalid or missing token returns to the connection form instead of showing empty skeleton thread cards.
+- Preserved existing server tokens, install key, FCM, backup, and release settings during `install-server.sh` upgrades.
+- Preserved desktop `nodeKey` and enrollment metadata during Windows agent reinstalls.
+- Added release signing hooks for packaged Windows executables plus a generated signing verification report.
+- Added Android assetlinks generation hardening so TWA verification keeps a valid JSON array.
+
 ## v0.5.0
 
 - Added a standalone self-check report at `/health.html` for server reachability, token access, storage, backups, FCM, node sync, command queue, and update status.

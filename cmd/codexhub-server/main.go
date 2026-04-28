@@ -552,7 +552,7 @@ func (s *server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	current := env("CODEXHUB_VERSION", version)
 	if current == "" || current == "dev" {
-		current = "0.4.9"
+		current = "0.5.1"
 	}
 	latestVersion, assets, source, err := s.fetchLatestRelease()
 	if err != nil {
@@ -2156,7 +2156,7 @@ func (s *server) installProfile(r *http.Request) map[string]any {
 	installKey := s.currentInstallKey()
 	releaseVersion := env("CODEXHUB_VERSION", version)
 	if releaseVersion == "dev" || releaseVersion == "" {
-		releaseVersion = "0.4.9"
+		releaseVersion = "0.5.1"
 	}
 	downloads := map[string]string{
 		"androidApk":         fmt.Sprintf("%s/downloads/codexhub-android-v%s.apk", base, releaseVersion),

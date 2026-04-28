@@ -22,7 +22,7 @@ const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
 const MAX_COMMAND_REQUEUES = Number(process.env.CODEXHUB_MAX_COMMAND_REQUEUES ?? 5);
 const FULL_CONTEXT_TTL_MS = Number(process.env.CODEXHUB_FULL_CONTEXT_TTL_MS ?? 30 * 60_000);
-const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.5.0";
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.5.1";
 const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
 const SQLITE_FILE = process.env.CODEXHUB_SQLITE_FILE
   ? path.resolve(process.env.CODEXHUB_SQLITE_FILE)
