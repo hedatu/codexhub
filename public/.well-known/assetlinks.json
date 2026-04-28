@@ -1,12 +1,12 @@
-[
-  {
-    "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "com.hedatu.codexhub",
-      "sha256_cert_fingerprints": [
-        "8F:8E:26:48:7A:F2:F3:AF:F9:AB:40:87:A3:6F:8C:9E:65:8D:A5:87:D8:34:F9:8D:DC:04:77:77:78:95:BC:40"
-      ]
-    }
-  }
-]
+{
+    "relation":  [
+                     "delegate_permission/common.handle_all_urls"
+                 ],
+    "target":  {
+                   "namespace":  "android_app",
+                   "package_name":  "com.hedatu.codexhub",
+                   "sha256_cert_fingerprints":  [
+                                                    "8F:8E:26:48:7A:F2:F3:AF:F9:AB:40:87:A3:6F:8C:9E:65:8D:A5:87:D8:34:F9:8D:DC:04:77:77:78:95:BC:40"
+                                                ]
+               }
+}

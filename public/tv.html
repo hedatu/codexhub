@@ -4,20 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#03111d" />
-    <title>Codex Fleet Wall</title>
+    <title>CodexHub 总控大屏</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/tv.css" />
   </head>
   <body class="tv-body fleet-body">
     <main id="fleetApp" class="fleet-shell" data-density="compact">
       <header class="fleet-topbar">
         <section class="fleet-brand" aria-label="大屏标题">
-          <p class="fleet-kicker"><span class="fleet-live-dot"></span>多机 Codex 线程总控中心</p>
-          <h1>Codex Fleet Wall</h1>
+          <p class="fleet-kicker"><span class="fleet-live-dot"></span><span data-i18n="brand.kicker">多机 Codex 线程总控中心</span></p>
+          <h1 data-i18n="brand.title">CodexHub 总控大屏</h1>
           <output id="fleetHealthStrip" class="fleet-health-strip" aria-live="polite"></output>
         </section>
         <section id="fleetMetrics" class="fleet-metrics" aria-label="全局指标"></section>
@@ -25,37 +26,45 @@
           <strong id="fleetViewport">-- x --</strong>
           <span><i class="fleet-live-dot"></i>LIVE</span>
           <em id="fleetSync">等待同步</em>
+          <label class="fleet-language" title="语言 / Language">
+            <select id="fleetLanguage" aria-label="语言 / Language">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
         </section>
       </header>
+
+      <section id="fleetCommandDeck" class="fleet-command-deck hidden" aria-label="指挥操作台"></section>
 
       <section id="tvLogin" class="fleet-login hidden" aria-label="连接 CodexHub">
         <form id="fleetLoginForm" class="fleet-login-card">
           <div>
-            <p class="fleet-kicker">CodexHub connection</p>
-            <h2>连接控制台</h2>
-            <p>大屏页复用 CodexHub 访问令牌，与主控制台共用同一份节点、线程和命令队列数据。</p>
+            <p class="fleet-kicker" data-i18n="login.kicker">CodexHub 连接</p>
+            <h2 data-i18n="login.title">连接控制台</h2>
+            <p data-i18n="login.desc">大屏页复用 CodexHub 访问令牌，与主控制台共用同一份节点、线程和命令队列数据。</p>
           </div>
           <label>
-            <span>服务器地址</span>
+            <span data-i18n="login.server">服务器地址</span>
             <input id="tvServerInput" type="url" placeholder="https://hub.example.com" autocomplete="url" />
           </label>
           <label>
-            <span>访问令牌</span>
+            <span data-i18n="login.token">访问令牌</span>
             <input id="tvTokenInput" type="password" placeholder="ADMIN_TOKEN 或 READONLY_TOKEN" autocomplete="current-password" />
           </label>
           <div class="fleet-login-actions">
-            <button id="tvSaveBtn" class="fleet-button primary" type="submit">连接</button>
-            <button id="fleetMockBtn" class="fleet-button ghost" type="button">预览大屏</button>
+            <button id="tvSaveBtn" class="fleet-button primary" type="submit" data-i18n="login.connect">连接</button>
+            <button id="fleetMockBtn" class="fleet-button ghost hidden" type="button" data-i18n="login.mock">预览大屏</button>
           </div>
         </form>
       </section>
 
-      <section id="tvContent" class="fleet-content hidden" aria-label="Codex Fleet Wall">
+      <section id="tvContent" class="fleet-content hidden" aria-label="CodexHub 总控大屏">
         <aside class="fleet-device-rail" aria-label="设备状态">
           <div class="fleet-section-head">
             <div>
-              <p class="fleet-kicker">Nodes</p>
-              <h2>设备状态</h2>
+              <p class="fleet-kicker" data-i18n="sections.nodesKicker">节点</p>
+              <h2 data-i18n="sections.nodes">设备状态</h2>
             </div>
             <span id="fleetNodeCount" class="fleet-count">0</span>
           </div>
@@ -66,22 +75,22 @@
         <section class="fleet-thread-area" aria-label="运行线程墙">
           <div class="fleet-section-head">
             <div>
-              <p class="fleet-kicker">Thread wall</p>
-              <h2>运行线程墙</h2>
+              <p class="fleet-kicker" data-i18n="sections.threadsKicker">线程墙</p>
+              <h2 data-i18n="sections.threads">运行线程墙</h2>
             </div>
             <div class="fleet-layout-tools">
               <label>
-                <span>密度</span>
+                <span data-i18n="controls.density">密度</span>
                 <select id="fleetDensity">
-                  <option value="comfortable">舒展</option>
-                  <option value="compact" selected>紧凑</option>
-                  <option value="dense">高密</option>
+                  <option value="comfortable" data-i18n="density.comfortable">舒展</option>
+                  <option value="compact" selected data-i18n="density.compact">紧凑</option>
+                  <option value="dense" data-i18n="density.dense">高密</option>
                 </select>
               </label>
               <label>
-                <span>列数</span>
+                <span data-i18n="controls.columns">列数</span>
                 <select id="fleetColumns">
-                  <option value="auto" selected>自动</option>
+                  <option value="auto" selected data-i18n="columns.auto">自动</option>
                   <option value="3">3</option>
                   <option value="4">4</option>
                   <option value="5">5</option>
@@ -96,8 +105,8 @@
         <aside class="fleet-decision-rail" aria-label="待处理与审批">
           <div class="fleet-section-head">
             <div>
-              <p class="fleet-kicker">Decision queue</p>
-              <h2>待处理与审批</h2>
+              <p class="fleet-kicker" data-i18n="sections.queueKicker">待处理队列</p>
+              <h2 data-i18n="sections.queue">待处理与审批</h2>
             </div>
             <span id="fleetQueueCount" class="fleet-count">0</span>
           </div>
@@ -108,15 +117,15 @@
       <footer id="fleetTimeline" class="fleet-timeline hidden" aria-label="实时事件流">
         <div class="fleet-section-head compact">
           <div>
-            <p class="fleet-kicker">Live events</p>
-            <h2>实时事件流</h2>
+            <p class="fleet-kicker" data-i18n="sections.eventsKicker">实时事件</p>
+            <h2 data-i18n="sections.events">实时事件流</h2>
           </div>
           <div class="fleet-timeline-actions">
             <label class="fleet-switch">
               <input id="fleetAutoScroll" type="checkbox" checked />
-              <span>自动滚动</span>
+              <span data-i18n="controls.autoScroll">自动滚动</span>
             </label>
-            <button id="fleetRefreshBtn" class="fleet-button icon" type="button" title="刷新">↻</button>
+            <button id="fleetRefreshBtn" class="fleet-button icon" type="button" title="请求电脑重新采集" aria-label="请求电脑重新采集">↻</button>
           </div>
         </div>
         <div id="fleetEvents" class="fleet-events"></div>
@@ -127,10 +136,10 @@
       <div class="fleet-modal-panel">
         <header class="fleet-modal-head">
           <div>
-            <p id="fleetModalMeta" class="fleet-kicker">Thread context</p>
+            <p id="fleetModalMeta" class="fleet-kicker">线程上下文</p>
             <h2 id="fleetModalTitle">审批与回复</h2>
           </div>
-          <button id="fleetModalClose" class="fleet-button icon" type="button" title="关闭">×</button>
+          <button id="fleetModalClose" class="fleet-button icon" type="button" title="关闭" aria-label="关闭">×</button>
         </header>
         <div id="fleetModalBody" class="fleet-modal-body"></div>
       </div>

@@ -20,8 +20,9 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
+const MAX_COMMAND_REQUEUES = Number(process.env.CODEXHUB_MAX_COMMAND_REQUEUES ?? 5);
 const FULL_CONTEXT_TTL_MS = Number(process.env.CODEXHUB_FULL_CONTEXT_TTL_MS ?? 30 * 60_000);
-const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.9";
+const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.5.0";
 const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
 const SQLITE_FILE = process.env.CODEXHUB_SQLITE_FILE
   ? path.resolve(process.env.CODEXHUB_SQLITE_FILE)
@@ -758,6 +759,8 @@ function buildSyncHealth(node, status, threads, unread) {
     leased: commands.filter((command) => command.status === "leased").length,
     done: commands.filter((command) => command.status === "done").length,
     failed: commands.filter((command) => command.status === "failed").length,
+    requeued: commands.reduce((sum, command) => sum + Number(command.requeueCount || 0), 0),
+    stuck: commands.filter((command) => command.status === "leased" && Date.parse(command.leasedAt ?? command.createdAt) < Date.now() - COMMAND_LEASE_MS).length,
   };
   const recentCommand = [...commands]
     .sort((a, b) => valueTime(b.completedAt ?? b.leasedAt ?? b.createdAt) - valueTime(a.completedAt ?? a.leasedAt ?? a.createdAt))[0] ?? null;
@@ -786,11 +789,13 @@ function buildSyncHealth(node, status, threads, unread) {
     {
       key: "commands",
       label: "命令回执",
-      state: commandCounts.failed > 0 ? "danger" : (commandCounts.queued + commandCounts.leased > 0 ? "warning" : "ok"),
+      state: commandCounts.failed + commandCounts.stuck > 0 ? "danger" : (commandCounts.queued + commandCounts.leased > 0 ? "warning" : "ok"),
       detail: commandCounts.failed > 0
         ? `${commandCounts.failed} 条命令失败`
+        : commandCounts.stuck > 0
+          ? `${commandCounts.stuck} 条命令租约超时，等待自动修复`
         : commandCounts.queued + commandCounts.leased > 0
-          ? `${commandCounts.queued + commandCounts.leased} 条命令等待桌面端回执`
+          ? `${commandCounts.queued + commandCounts.leased} 条命令等待桌面端回执${commandCounts.requeued > 0 ? `，已自动重试 ${commandCounts.requeued} 次` : ""}`
           : "命令队列正常",
       at: recentCommand?.completedAt ?? recentCommand?.leasedAt ?? recentCommand?.createdAt ?? null,
     },
@@ -828,6 +833,9 @@ function buildSyncHealth(node, status, threads, unread) {
       createdAt: recentCommand.createdAt,
       leasedAt: recentCommand.leasedAt ?? null,
       completedAt: recentCommand.completedAt ?? null,
+      requeueCount: recentCommand.requeueCount ?? 0,
+      lastRequeuedAt: recentCommand.lastRequeuedAt ?? null,
+      leaseExpiredAt: recentCommand.leaseExpiredAt ?? null,
       error: recentCommand.result?.error ?? recentCommand.result?.result?.error ?? null,
     } : null,
     unreadNotifications: unread.length,
@@ -1382,8 +1390,35 @@ function cleanupCommands(node) {
   const leaseCutoff = Date.now() - COMMAND_LEASE_MS;
   for (const command of node.commands ?? []) {
     if (command.status === "leased" && Date.parse(command.leasedAt ?? command.createdAt) < leaseCutoff) {
-      command.status = "queued";
-      command.leasedAt = null;
+      const expiredAt = nowIso();
+      command.requeueCount = Number(command.requeueCount || 0) + 1;
+      command.leaseExpiredAt = expiredAt;
+      command.lastLeaseError = `command lease expired after ${COMMAND_LEASE_MS}ms`;
+      if (command.requeueCount >= MAX_COMMAND_REQUEUES) {
+        command.status = "failed";
+        command.completedAt = expiredAt;
+        command.result = {
+          ok: false,
+          error: "命令多次下发后没有收到桌面端回执，已自动标记失败",
+          requeueCount: command.requeueCount,
+        };
+        recordAudit("command.failed.stuck", "system", {
+          nodeId: node.id,
+          commandId: command.id,
+          kind: command.action?.kind || "command",
+          requeueCount: command.requeueCount,
+        });
+      } else {
+        command.status = "queued";
+        command.leasedAt = null;
+        command.lastRequeuedAt = expiredAt;
+        recordAudit("command.requeued", "system", {
+          nodeId: node.id,
+          commandId: command.id,
+          kind: command.action?.kind || "command",
+          requeueCount: command.requeueCount,
+        });
+      }
     }
   }
   node.commands = (node.commands ?? []).filter((command) => {
