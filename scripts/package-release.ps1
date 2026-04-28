@@ -13,6 +13,26 @@ $androidSigningDir = Join-Path $dist "android"
 $androidSigningBackup = Join-Path ([System.IO.Path]::GetTempPath()) ("codexhub-android-signing-" + [guid]::NewGuid().ToString())
 $androidApkBackup = Join-Path ([System.IO.Path]::GetTempPath()) ("codexhub-android-apks-" + [guid]::NewGuid().ToString())
 
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+function Compress-Directory($SourceDir, $DestinationPath) {
+  if (Test-Path -LiteralPath $DestinationPath) {
+    Remove-Item -LiteralPath $DestinationPath -Force
+  }
+  $source = Resolve-Path -LiteralPath $SourceDir
+  $sourcePrefix = $source.Path.TrimEnd("\", "/") + [System.IO.Path]::DirectorySeparatorChar
+  $zip = [System.IO.Compression.ZipFile]::Open($DestinationPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    Get-ChildItem -LiteralPath $source -Recurse -File -Force | ForEach-Object {
+      $relative = $_.FullName.Substring($sourcePrefix.Length).Replace("\", "/")
+      [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $relative, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+  } finally {
+    $zip.Dispose()
+  }
+}
+
 if (Test-Path -LiteralPath $androidSigningDir) {
   Copy-Item -LiteralPath $androidSigningDir -Destination $androidSigningBackup -Recurse -Force
 }
@@ -174,7 +194,7 @@ function Install-UnixNodeRuntimePackage($target, $platform, $goArch, $nodeArch) 
 
 $sourceDir = Join-Path $stage "codexhub-source-v$Version"
 Copy-Items $common $sourceDir
-Compress-Archive -Path (Join-Path $sourceDir "*") -DestinationPath (Join-Path $dist "codexhub-source-v$Version.zip") -Force
+Compress-Directory $sourceDir (Join-Path $dist "codexhub-source-v$Version.zip")
 
 $serverDir = Join-Path $stage "codexhub-server-v$Version"
 Copy-Items @(
@@ -195,7 +215,7 @@ Copy-Items @(
   "docs"
 ) $serverDir
 Copy-GoBinaries @("codexhub-server-linux-*", "codexhub-server-windows-*", "codexhub-server-darwin-*") $serverDir
-Compress-Archive -Path (Join-Path $serverDir "*") -DestinationPath (Join-Path $dist "codexhub-server-v$Version.zip") -Force
+Compress-Directory $serverDir (Join-Path $dist "codexhub-server-v$Version.zip")
 
 $agentDir = Join-Path $stage "codexhub-windows-agent-v$Version"
 Copy-Items @(
@@ -225,7 +245,7 @@ if (Get-Command go.exe -ErrorAction SilentlyContinue) {
 } elseif (-not (Test-Path -LiteralPath $wrapperTarget)) {
   Write-Warning "go.exe was not found; Windows agent package will not include scripts\windows\codex-wrapper.exe."
 }
-Compress-Archive -Path (Join-Path $agentDir "*") -DestinationPath (Join-Path $dist "codexhub-windows-agent-v$Version.zip") -Force
+Compress-Directory $agentDir (Join-Path $dist "codexhub-windows-agent-v$Version.zip")
 
 $linuxAgentDir = Join-Path $stage "codexhub-linux-agent-v$Version"
 Copy-Items @(
@@ -245,7 +265,7 @@ Copy-GoBinaries @("codexhub-agent-linux-*", "codexhub-farfield-linux-*") $linuxA
 Install-FarfieldRuntimePackage $linuxAgentDir
 Install-UnixNodeRuntimePackage $linuxAgentDir "linux" "amd64" "x64"
 Install-UnixNodeRuntimePackage $linuxAgentDir "linux" "arm64" "arm64"
-Compress-Archive -Path (Join-Path $linuxAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-linux-agent-v$Version.zip") -Force
+Compress-Directory $linuxAgentDir (Join-Path $dist "codexhub-linux-agent-v$Version.zip")
 
 $macosAgentDir = Join-Path $stage "codexhub-macos-agent-v$Version"
 Copy-Items @(
@@ -265,7 +285,7 @@ Copy-GoBinaries @("codexhub-agent-darwin-*", "codexhub-farfield-darwin-*") $maco
 Install-FarfieldRuntimePackage $macosAgentDir
 Install-UnixNodeRuntimePackage $macosAgentDir "darwin" "amd64" "x64"
 Install-UnixNodeRuntimePackage $macosAgentDir "darwin" "arm64" "arm64"
-Compress-Archive -Path (Join-Path $macosAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-macos-agent-v$Version.zip") -Force
+Compress-Directory $macosAgentDir (Join-Path $dist "codexhub-macos-agent-v$Version.zip")
 
 $androidDir = Join-Path $stage "codexhub-android-twa-v$Version"
 Copy-Items @(
@@ -274,7 +294,7 @@ Copy-Items @(
   "android",
   "docs\ANDROID_APP.md"
 ) $androidDir
-Compress-Archive -Path (Join-Path $androidDir "*") -DestinationPath (Join-Path $dist "codexhub-android-twa-v$Version.zip") -Force
+Compress-Directory $androidDir (Join-Path $dist "codexhub-android-twa-v$Version.zip")
 
 $companionDir = Join-Path $stage "codexhub-companion-v$Version"
 Copy-Items @(
@@ -284,16 +304,16 @@ Copy-Items @(
   "scripts\build-companion.ps1",
   "docs\PLATFORM_SUPPORT.md"
 ) $companionDir
-Compress-Archive -Path (Join-Path $companionDir "*") -DestinationPath (Join-Path $dist "codexhub-companion-v$Version.zip") -Force
+Compress-Directory $companionDir (Join-Path $dist "codexhub-companion-v$Version.zip")
 
 if (Test-Path -LiteralPath $goDist) {
-  Compress-Archive -Path (Join-Path $goDist "*") -DestinationPath (Join-Path $dist "codexhub-go-binaries-v$Version.zip") -Force
+  Compress-Directory $goDist (Join-Path $dist "codexhub-go-binaries-v$Version.zip")
 }
 
 $companionWinUnpacked = Join-Path $root "companion\desktop\dist\win-unpacked"
 if (Test-Path -LiteralPath $companionWinUnpacked) {
   Invoke-CodeSignIfConfigured (Get-ChildItem -LiteralPath $companionWinUnpacked -Filter "*.exe" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
-  Compress-Archive -Path (Join-Path $companionWinUnpacked "*") -DestinationPath (Join-Path $dist "codexhub-companion-windows-x64-v$Version.zip") -Force
+  Compress-Directory $companionWinUnpacked (Join-Path $dist "codexhub-companion-windows-x64-v$Version.zip")
 } else {
   Write-Warning "companion\desktop\dist\win-unpacked was not found; skipping Windows x64 Companion portable zip."
 }
