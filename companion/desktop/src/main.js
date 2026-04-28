@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, shell, dialog, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, dialog, nativeImage, Notification } = require("electron");
 const { execFile, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -11,6 +11,9 @@ const WINDOWS_TASKS = ["CodexHubFarfield", "CodexHubAgent"];
 const LINUX_SERVICES = ["codexhub-farfield.service", "codexhub-agent.service"];
 const MACOS_LABELS = ["com.codexhub.farfield", "com.codexhub.agent"];
 const WINDOWS_RUN_NAME = "CodexHub Companion";
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const AUTO_REPAIR_COOLDOWN_MS = 2 * 60 * 1000;
+const AUTO_REPAIR_RECHECK_DELAY_MS = 5 * 1000;
 
 const I18N = {
   zh: {
@@ -82,6 +85,7 @@ const I18N = {
     dialogTitle: "CodexHub 本机状态",
     updateReady: (version) => `发现新版本 ${version}`,
     updateCurrent: "当前已是最新版本",
+    updateCheckFailed: "检查更新失败",
     autoRepair: "自动修复",
     lastRepair: "最近修复",
   },
@@ -154,6 +158,7 @@ const I18N = {
     dialogTitle: "CodexHub local status",
     updateReady: (version) => `New version available: ${version}`,
     updateCurrent: "You are on the latest version",
+    updateCheckFailed: "Update check failed",
     autoRepair: "Auto Repair",
     lastRepair: "Last Repair",
   },
@@ -166,7 +171,13 @@ let lastStatus = I18N[currentLanguage].checking;
 let lastDetails = null;
 let lastConfig = readAgentConfig();
 let repairInFlight = false;
-let lastRepair = null;
+let lastRepair = readSettings().lastRepair || null;
+let updateState = {
+  lastCheckedAt: null,
+  latest: pkg.version,
+  updateAvailable: false,
+  error: "",
+};
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
@@ -278,12 +289,46 @@ async function downloadUpdateInstaller(asset) {
   return target;
 }
 
-async function checkForUpdates(interactive = true) {
+function updateMenuLabel() {
+  const label = text().menuCheckUpdate;
+  return updateState.updateAvailable && updateState.latest
+    ? `${label} · v${updateState.latest}`
+    : label;
+}
+
+function notifyUpdateAvailable(latest) {
+  const settings = readSettings();
+  if (settings.lastNotifiedUpdate === latest) return;
+  writeSettings({ ...settings, lastNotifiedUpdate: latest });
+  if (!Notification.isSupported()) return;
+  const notice = new Notification({
+    title: APP_NAME,
+    body: text().updateReady(latest),
+    silent: false,
+  });
+  notice.on("click", () => checkForUpdates(true).catch(() => {}));
+  notice.show();
+}
+
+async function checkForUpdates(options = true) {
+  const interactive = typeof options === "boolean" ? options : Boolean(options?.interactive);
+  const notify = typeof options === "object" ? options.notify !== false : false;
   try {
     const result = await fetchJson(LATEST_RELEASE_API);
     if (!result.ok) throw new Error(result.payload?.message || `HTTP ${result.status}`);
     const latest = String(result.payload?.tag_name || "").replace(/^v/, "");
     if (latest && compareVersion(latest, pkg.version) > 0) {
+      updateState = {
+        lastCheckedAt: new Date().toISOString(),
+        latest,
+        updateAvailable: true,
+        error: "",
+      };
+      rebuildMenu();
+      if (!interactive) {
+        if (notify) notifyUpdateAvailable(latest);
+        return { ok: true, latest, updateAvailable: true };
+      }
       const installerAsset = (result.payload?.assets ?? []).find((asset) => /companion-installer-windows-x64.*\.exe$/i.test(asset.name || ""));
       const choice = await dialog.showMessageBox({
         type: "info",
@@ -304,13 +349,26 @@ async function checkForUpdates(interactive = true) {
       }
       return { ok: true, latest, updateAvailable: true };
     }
+    updateState = {
+      lastCheckedAt: new Date().toISOString(),
+      latest: latest || pkg.version,
+      updateAvailable: false,
+      error: "",
+    };
+    rebuildMenu();
     if (interactive) {
       await dialog.showMessageBox({ type: "info", message: text().updateCurrent, detail: `${APP_NAME} ${pkg.version}` });
     }
     return { ok: true, latest: latest || pkg.version, updateAvailable: false };
   } catch (error) {
+    updateState = {
+      ...updateState,
+      lastCheckedAt: new Date().toISOString(),
+      error: error.message,
+    };
+    rebuildMenu();
     if (interactive) {
-      await dialog.showMessageBox({ type: "warning", message: currentLanguage === "en" ? "Update check failed" : "检查更新失败", detail: error.message });
+      await dialog.showMessageBox({ type: "warning", message: text().updateCheckFailed, detail: error.message });
     }
     return { ok: false, error: error.message };
   }
@@ -584,20 +642,36 @@ function needsRepair(details) {
   return serviceBroken || !details.farfield?.ok || !details.cloud?.ok;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function autoRepairTick() {
   if (!autoRepairEnabled() || repairInFlight) return;
+  if (lastRepair?.at) {
+    const lastRepairAt = Date.parse(lastRepair.at);
+    if (Number.isFinite(lastRepairAt) && Date.now() - lastRepairAt < AUTO_REPAIR_COOLDOWN_MS) return;
+  }
   repairInFlight = true;
   try {
     await queryStatus();
     if (!needsRepair(lastDetails)) return;
+    const before = summarizeStatus(lastDetails);
     await startServices();
+    await sleep(AUTO_REPAIR_RECHECK_DELAY_MS);
+    await queryStatus();
+    const recovered = !needsRepair(lastDetails);
     lastRepair = {
       at: new Date().toISOString(),
-      reason: summarizeStatus(lastDetails),
+      reason: recovered
+        ? `${before} -> ${currentLanguage === "en" ? "recovered after restart" : "重启后已恢复"}`
+        : `${before} -> ${currentLanguage === "en" ? "still unhealthy after restart" : "重启后仍需处理"}: ${summarizeStatus(lastDetails)}`,
+      ok: recovered,
     };
     writeSettings({ ...readSettings(), lastRepair });
   } catch (error) {
-    lastRepair = { at: new Date().toISOString(), reason: error.message };
+    lastRepair = { at: new Date().toISOString(), reason: error.message, ok: false };
+    writeSettings({ ...readSettings(), lastRepair });
   } finally {
     repairInFlight = false;
   }
@@ -912,7 +986,7 @@ function rebuildMenu() {
     { label: tx.menuStart, click: startServices },
     { label: tx.menuStop, click: stopServices },
     { label: tx.menuRefresh, click: refresh },
-    { label: tx.menuCheckUpdate, click: () => checkForUpdates(true) },
+    { label: updateMenuLabel(), click: () => checkForUpdates(true) },
     {
       label: tx.menuAutoRepair,
       type: "checkbox",
@@ -947,7 +1021,8 @@ function rebuildMenu() {
     { label: tx.menuQuit, click: () => app.quit() },
   ]);
   tray.setContextMenu(menu);
-  tray.setToolTip(`${APP_NAME}\n${lastStatus}`);
+  const updateLine = updateState.updateAvailable && updateState.latest ? `\n${tx.updateReady(updateState.latest)}` : "";
+  tray.setToolTip(`${APP_NAME}\n${lastStatus}${updateLine}`);
 }
 
 async function refresh() {
@@ -968,7 +1043,8 @@ app.whenReady().then(async () => {
   await refresh();
   setInterval(refresh, 30_000);
   setInterval(autoRepairTick, 60_000);
-  setTimeout(() => checkForUpdates(false), 15_000);
+  setInterval(() => checkForUpdates({ interactive: false, notify: true }), UPDATE_CHECK_INTERVAL_MS);
+  setTimeout(() => checkForUpdates({ interactive: false, notify: true }), 15_000);
   setTimeout(autoRepairTick, 20_000);
 });
 

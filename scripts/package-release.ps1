@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.4.9",
+  [string]$Version = "0.5.0",
   [string]$FarfieldVersion = "0.2.2",
   [string]$NodeVersion = "20.18.1"
 )
@@ -32,6 +32,19 @@ if (Test-Path -LiteralPath $androidSigningBackup) {
 if (Test-Path -LiteralPath $androidApkBackup) {
   Get-ChildItem -LiteralPath $androidApkBackup -File | Copy-Item -Destination $dist -Force
   Remove-Item -LiteralPath $androidApkBackup -Recurse -Force
+}
+
+$androidApkForVersion = Join-Path $dist "codexhub-android-v$Version.apk"
+if (-not (Test-Path -LiteralPath $androidApkForVersion)) {
+  if ((Get-Command java.exe -ErrorAction SilentlyContinue) -and ($env:ANDROID_HOME -or $env:ANDROID_SDK_ROOT)) {
+    try {
+      & (Join-Path $PSScriptRoot "build-android-twa.ps1") -Version $Version -OutputDir $androidSigningDir -ApkOutput $androidApkForVersion
+    } catch {
+      Write-Warning "Android APK build failed; continuing with TWA source package only. $($_.Exception.Message)"
+    }
+  } else {
+    Write-Warning "Java or Android SDK was not found; skipping Android APK build."
+  }
 }
 
 $goDist = Join-Path $dist "go"

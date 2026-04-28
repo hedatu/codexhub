@@ -1,7 +1,7 @@
 param(
   [string]$Manifest = "$PSScriptRoot\..\android\twa-manifest.json",
   [string]$OutputDir = "$PSScriptRoot\..\dist\android",
-  [string]$Version = "0.4.9",
+  [string]$Version = "0.5.0",
   [string]$ApkOutput = "",
   [string]$KeyPassword = $env:CODEXHUB_ANDROID_KEY_PASSWORD,
   [switch]$SkipInstall
@@ -259,7 +259,7 @@ Copy-Item -LiteralPath $signed -Destination $ApkOutput -Force
 $digestLine = $verifyOutput | Where-Object { $_ -match "Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)" } | Select-Object -First 1
 if ($digestLine -match "Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)") {
   $fingerprint = (($Matches[1].ToUpperInvariant() -split "(.{2})" | Where-Object { $_ }) -join ":")
-  $assetLinks = @(
+  $assetLinksObject = @(
     [ordered]@{
       relation = @("delegate_permission/common.handle_all_urls")
       target = [ordered]@{
@@ -268,7 +268,8 @@ if ($digestLine -match "Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)")
         sha256_cert_fingerprints = @($fingerprint)
       }
     }
-  ) | ConvertTo-Json -Depth 8
+  )
+  $assetLinks = ConvertTo-Json -InputObject $assetLinksObject -Depth 8
   Write-Utf8NoBom (Join-Path $repoRoot "public\.well-known\assetlinks.json") $assetLinks
   Write-Utf8NoBom (Join-Path $repoRoot "android\assetlinks.template.json") $assetLinks
   Write-Host "Android asset links fingerprint: $fingerprint"
