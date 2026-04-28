@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.0
+
+- Added a standalone self-check report at `/health.html` for server reachability, token access, storage, backups, FCM, node sync, command queue, and update status.
+- Added a health report shortcut to the TV command center.
+- Hardened Companion auto-repair with cooldown, post-restart recheck, and persisted repair results.
+- Added command lease retry visibility and automatic failure after repeated command timeouts to prevent stuck queues.
+- Added a troubleshooting manual for server, desktop, Farfield, SQLite backups, FCM, 502 errors, and command queue issues.
+- Updated release packaging defaults and documentation to v0.5.0.
+
 ## v0.4.9
 
 - Fixed the TV dashboard queue so unread completion/update notifications from `node.attention` appear in the pending work list.

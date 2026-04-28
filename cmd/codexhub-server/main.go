@@ -34,6 +34,8 @@ import (
 
 var version = "dev"
 
+const maxCommandRequeues = 5
+
 type serverConfig struct {
 	Root                  string
 	PublicDir             string
@@ -1582,12 +1584,18 @@ func (s *server) syncHealthLocked(node *codexhub.Node, threads []codexhub.Thread
 	if latest != nil {
 		latestThreadAt = firstNonZero(latest.LatestFinalMessageAt, latest.LatestProgressMessageAt, latest.LatestMessageAt, latest.UpdatedAt, latest.CreatedAt)
 	}
-	commandCounts := map[string]int{"queued": 0, "leased": 0, "done": 0, "failed": 0}
+	commandCounts := map[string]int{"queued": 0, "leased": 0, "done": 0, "failed": 0, "requeued": 0, "stuck": 0}
 	var recent *codexhub.Command
 	for i := range node.Commands {
 		c := &node.Commands[i]
 		if _, ok := commandCounts[c.Status]; ok {
 			commandCounts[c.Status]++
+		}
+		commandCounts["requeued"] += c.RequeueCount
+		if c.Status == "leased" {
+			if leased, ok := parseTime(c.LeasedAt); ok && time.Since(leased) > s.cfg.CommandLease {
+				commandCounts["stuck"]++
+			}
 		}
 		if recent == nil || anyTimeMillis(firstNonZero(c.CompletedAt, c.LeasedAt, c.CreatedAt)) > anyTimeMillis(firstNonZero(recent.CompletedAt, recent.LeasedAt, recent.CreatedAt)) {
 			recent = c
@@ -1665,13 +1673,16 @@ func (s *server) syncHealthLocked(node *codexhub.Node, threads []codexhub.Thread
 	var recentCommand any
 	if recent != nil {
 		recentCommand = map[string]any{
-			"id":          recent.ID,
-			"status":      recent.Status,
-			"kind":        firstNonEmptyString(stringValue(recent.Action["kind"]), "command"),
-			"createdAt":   recent.CreatedAt,
-			"leasedAt":    recent.LeasedAt,
-			"completedAt": recent.CompletedAt,
-			"error":       commandError(recent),
+			"id":             recent.ID,
+			"status":         recent.Status,
+			"kind":           firstNonEmptyString(stringValue(recent.Action["kind"]), "command"),
+			"createdAt":      recent.CreatedAt,
+			"leasedAt":       recent.LeasedAt,
+			"completedAt":    recent.CompletedAt,
+			"requeueCount":   recent.RequeueCount,
+			"lastRequeuedAt": recent.LastRequeuedAt,
+			"leaseExpiredAt": recent.LeaseExpiredAt,
+			"error":          commandError(recent),
 		}
 	}
 	return map[string]any{
@@ -1699,6 +1710,9 @@ func commandCheckState(counts map[string]int) string {
 	if counts["failed"] > 0 {
 		return "danger"
 	}
+	if counts["stuck"] > 0 {
+		return "danger"
+	}
 	if counts["queued"]+counts["leased"] > 0 {
 		return "warning"
 	}
@@ -1709,7 +1723,13 @@ func commandCheckDetail(counts map[string]int) string {
 	if counts["failed"] > 0 {
 		return fmt.Sprintf("%d 条命令失败", counts["failed"])
 	}
+	if counts["stuck"] > 0 {
+		return fmt.Sprintf("%d 条命令租约超时，等待自动修复", counts["stuck"])
+	}
 	if pending := counts["queued"] + counts["leased"]; pending > 0 {
+		if counts["requeued"] > 0 {
+			return fmt.Sprintf("%d 条命令等待桌面端回执，已自动重试 %d 次", pending, counts["requeued"])
+		}
 		return fmt.Sprintf("%d 条命令等待桌面端回执", pending)
 	}
 	return "命令队列正常"
@@ -2532,8 +2552,35 @@ func (s *server) cleanupCommandsLocked(node *codexhub.Node) {
 	for _, c := range node.Commands {
 		if c.Status == "leased" {
 			if leased, ok := parseTime(c.LeasedAt); ok && now.Sub(leased) > s.cfg.CommandLease {
-				c.Status = "queued"
-				c.LeasedAt = nil
+				expiredAt := nowISO()
+				c.RequeueCount++
+				c.LeaseExpiredAt = expiredAt
+				c.LastLeaseError = fmt.Sprintf("command lease expired after %s", s.cfg.CommandLease)
+				if c.RequeueCount >= maxCommandRequeues {
+					c.Status = "failed"
+					c.CompletedAt = expiredAt
+					c.Result = map[string]any{
+						"ok":           false,
+						"error":        "命令多次下发后没有收到桌面端回执，已自动标记失败",
+						"requeueCount": c.RequeueCount,
+					}
+					s.recordAuditLocked("command.failed.stuck", "system", map[string]any{
+						"nodeId":       node.ID,
+						"commandId":    c.ID,
+						"kind":         firstNonEmptyString(stringValue(c.Action["kind"]), "command"),
+						"requeueCount": c.RequeueCount,
+					})
+				} else {
+					c.Status = "queued"
+					c.LeasedAt = nil
+					c.LastRequeuedAt = expiredAt
+					s.recordAuditLocked("command.requeued", "system", map[string]any{
+						"nodeId":       node.ID,
+						"commandId":    c.ID,
+						"kind":         firstNonEmptyString(stringValue(c.Action["kind"]), "command"),
+						"requeueCount": c.RequeueCount,
+					})
+				}
 			}
 		}
 		if c.Status == "queued" || c.Status == "leased" {
