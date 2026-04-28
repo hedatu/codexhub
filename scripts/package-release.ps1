@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.5.0",
+  [string]$Version = "0.5.1",
   [string]$FarfieldVersion = "0.2.2",
   [string]$NodeVersion = "20.18.1"
 )
@@ -48,8 +48,21 @@ if (-not (Test-Path -LiteralPath $androidApkForVersion)) {
 }
 
 $goDist = Join-Path $dist "go"
+
+$signingConfigured = $env:CODEXHUB_CODESIGN_THUMBPRINT -or $env:CODEXHUB_CODESIGN_PFX
+function Invoke-CodeSignIfConfigured($Path) {
+  if (-not $signingConfigured) {
+    return
+  }
+  $files = @($Path | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+  if ($files.Count -gt 0) {
+    & (Join-Path $PSScriptRoot "sign-windows-artifacts.ps1") -Path $files
+  }
+}
+
 if (Get-Command go.exe -ErrorAction SilentlyContinue) {
   & (Join-Path $PSScriptRoot "build-go.ps1") -Version $Version -OutputDir $goDist
+  Invoke-CodeSignIfConfigured (Get-ChildItem -LiteralPath $goDist -Filter "*.exe" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
 } else {
   Write-Warning "go.exe was not found; Go server/agent binaries will not be included."
 }
@@ -208,6 +221,7 @@ $wrapperTarget = Join-Path $wrapperTargetDir "codex-wrapper.exe"
 if (Get-Command go.exe -ErrorAction SilentlyContinue) {
   New-Item -ItemType Directory -Force -Path $wrapperTargetDir | Out-Null
   & go build -tags codexhub_codex_wrapper -o $wrapperTarget $wrapperSource
+  Invoke-CodeSignIfConfigured @($wrapperTarget)
 } elseif (-not (Test-Path -LiteralPath $wrapperTarget)) {
   Write-Warning "go.exe was not found; Windows agent package will not include scripts\windows\codex-wrapper.exe."
 }
@@ -278,6 +292,7 @@ if (Test-Path -LiteralPath $goDist) {
 
 $companionWinUnpacked = Join-Path $root "companion\desktop\dist\win-unpacked"
 if (Test-Path -LiteralPath $companionWinUnpacked) {
+  Invoke-CodeSignIfConfigured (Get-ChildItem -LiteralPath $companionWinUnpacked -Filter "*.exe" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
   Compress-Archive -Path (Join-Path $companionWinUnpacked "*") -DestinationPath (Join-Path $dist "codexhub-companion-windows-x64-v$Version.zip") -Force
 } else {
   Write-Warning "companion\desktop\dist\win-unpacked was not found; skipping Windows x64 Companion portable zip."
@@ -288,6 +303,31 @@ if (Get-Command go.exe -ErrorAction SilentlyContinue) {
 } else {
   Write-Warning "go.exe was not found; skipping Windows Companion installer build."
 }
+
+$signatureTargets = @()
+if (Test-Path -LiteralPath $goDist) {
+  $signatureTargets += Get-ChildItem -LiteralPath $goDist -Filter "*.exe" -File -ErrorAction SilentlyContinue
+}
+if (Test-Path -LiteralPath $companionWinUnpacked) {
+  $signatureTargets += Get-ChildItem -LiteralPath $companionWinUnpacked -Filter "*.exe" -File -ErrorAction SilentlyContinue
+}
+$signatureTargets += Get-ChildItem -LiteralPath $dist -Filter "*.exe" -File -ErrorAction SilentlyContinue
+$signatureReport = $signatureTargets | Sort-Object FullName -Unique | ForEach-Object {
+  $signature = Get-AuthenticodeSignature -LiteralPath $_.FullName
+  [ordered]@{
+    path = $_.FullName
+    name = $_.Name
+    status = [string]$signature.Status
+    signer = $signature.SignerCertificate.Subject
+    thumbprint = $signature.SignerCertificate.Thumbprint
+  }
+}
+[ordered]@{
+  version = $Version
+  generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  signingConfigured = [bool]$signingConfigured
+  artifacts = $signatureReport
+} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $dist "codexhub-signing-report-v$Version.json") -Encoding UTF8
 
 $manifest = Get-ChildItem -LiteralPath $dist -File |
   Where-Object { $_.Name -like "*v$Version*" } |
