@@ -7,7 +7,7 @@ EXISTING_ENV_FILE="$INSTALL_DIR/codexhub.env"
 env_file_value() {
   local key="$1"
   if [ -f "$EXISTING_ENV_FILE" ]; then
-    grep -E "^${key}=" "$EXISTING_ENV_FILE" | tail -n 1 | cut -d= -f2-
+    grep -E "^${key}=" "$EXISTING_ENV_FILE" | tail -n 1 | cut -d= -f2- || true
   fi
 }
 
