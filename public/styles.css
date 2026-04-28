@@ -608,6 +608,29 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.mini-list {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.mini-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.mini-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
 .node-card {
   display: grid;
   gap: 12px;
@@ -2739,6 +2762,98 @@ textarea:focus {
   background: rgba(184, 118, 255, 0.08);
   font-size: 11px;
   font-weight: 800;
+}
+
+.fleet-modal-card.context-tools {
+  gap: 10px;
+}
+
+.fleet-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fleet-context-note {
+  margin: 0;
+  color: #9fb3c5;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fleet-full-context,
+.fleet-proposal-audit {
+  display: grid;
+  gap: 8px;
+}
+
+.fleet-context-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fleet-context-meta span {
+  max-width: 100%;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: #b8d8e8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(152, 219, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(152, 219, 255, 0.06);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.fleet-full-context-list,
+.fleet-audit-list {
+  display: grid;
+  gap: 7px;
+}
+
+.fleet-full-context-list article,
+.fleet-audit-list article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.fleet-full-context-list strong,
+.fleet-audit-list strong {
+  color: #e8f9ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.fleet-full-context-list span,
+.fleet-audit-list span {
+  color: #7f96aa;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.fleet-full-context-list p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #cfe8f3;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.fleet-audit-list code {
+  overflow: hidden;
+  color: #b8b4ff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .fleet-policy {

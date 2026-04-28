@@ -181,6 +181,19 @@ const installProfile = await get("/api/install-profile", ADMIN_TOKEN);
 if (!installProfile.installKey || !installProfile.desktop?.powershell?.includes("install-desktop-agent.ps1")) {
   throw new Error("Expected install profile to include install key and PowerShell command");
 }
+const security = await get("/api/security/status", ADMIN_TOKEN);
+if (!security.auth || !security.devices || !security.storage) {
+  throw new Error("Expected security status to include auth, devices and storage");
+}
+const backups = await get("/api/backups", ADMIN_TOKEN);
+if (!Array.isArray(backups.backups)) {
+  throw new Error("Expected backup list");
+}
+const update = await get("/api/update/check", ADMIN_TOKEN);
+if (!update.currentVersion) {
+  throw new Error("Expected update check to include currentVersion");
+}
+await queueAction({ kind: "selfUpdate", provider: "codex" });
 
 const state = await get("/api/state", ADMIN_TOKEN);
 console.log(JSON.stringify(state.totals, null, 2));

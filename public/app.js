@@ -15,10 +15,17 @@ const dom = {
   linuxInstallCommand: document.querySelector("#linuxInstallCommand"),
   macosInstallCommand: document.querySelector("#macosInstallCommand"),
   pushTokenInput: document.querySelector("#pushTokenInput"),
+  pushStatusText: document.querySelector("#pushStatusText"),
   registerPushBtn: document.querySelector("#registerPushBtn"),
   testPushBtn: document.querySelector("#testPushBtn"),
   dailyReportText: document.querySelector("#dailyReportText"),
   storageText: document.querySelector("#storageText"),
+  backupStatusText: document.querySelector("#backupStatusText"),
+  backupList: document.querySelector("#backupList"),
+  createBackupBtn: document.querySelector("#createBackupBtn"),
+  updateStatusText: document.querySelector("#updateStatusText"),
+  checkUpdateBtn: document.querySelector("#checkUpdateBtn"),
+  securityStatusText: document.querySelector("#securityStatusText"),
   rotateInstallKeyBtn: document.querySelector("#rotateInstallKeyBtn"),
   saveConfigBtn: document.querySelector("#saveConfigBtn"),
   settingsBtn: document.querySelector("#settingsBtn"),
@@ -51,6 +58,9 @@ const state = {
   selectedThreadId: null,
   installProfile: null,
   auditLogs: [],
+  opsStatus: null,
+  backups: [],
+  updateStatus: null,
   nodeCredentials: new Map(),
   eventSource: null,
   refreshTimer: null,
@@ -627,6 +637,42 @@ function renderOpsStatus() {
     const storage = state.dashboard.storage ?? {};
     dom.storageText.textContent = `${storage.driver || "json"} · ${storage.sqliteNote || "状态文件持久化已启用"}`;
   }
+  const ops = state.opsStatus;
+  if (dom.pushStatusText) {
+    const push = ops?.push ?? {};
+    dom.pushStatusText.textContent = `FCM ${push.fcmConfigured ? "已配置" : "未配置"} · Web ${push.firebaseWebConfigured ? "已配置" : "未配置"} · 令牌 ${push.subscriptions ?? 0} 个`;
+  }
+  if (dom.securityStatusText) {
+    const auth = ops?.auth ?? {};
+    const devices = ops?.devices ?? {};
+    dom.securityStatusText.textContent = `管理令牌 ${auth.adminTokenConfigured ? "已设置" : "默认值风险"} · 只读令牌 ${auth.readonlyTokenConfigured ? "已设置" : "未设置"} · 活跃设备 ${devices.active ?? 0}`;
+  }
+  if (dom.backupStatusText) {
+    const latest = state.backups?.[0];
+    dom.backupStatusText.textContent = latest ? `最近备份 ${timeAgo(latest.modifiedAt)} · ${formatBytes(latest.size)}` : "还没有服务器备份";
+  }
+  if (dom.backupList) {
+    dom.backupList.innerHTML = (state.backups ?? []).slice(0, 3).map((backup) => `
+      <div class="mini-row">
+        <span>${escapeHtml(backup.name)}</span>
+        <strong>${escapeHtml(formatBytes(backup.size))}</strong>
+        <button class="text-button" data-restore-backup="${escapeHtml(backup.name)}">恢复</button>
+      </div>
+    `).join("") || `<p class="preview">暂无备份。</p>`;
+  }
+  if (dom.updateStatusText) {
+    const update = state.updateStatus;
+    dom.updateStatusText.textContent = update
+      ? `当前 ${update.currentVersion || "未知"} · 最新 ${update.latestVersion || "未知"} · ${update.updateAvailable ? "可更新" : "已是最新"}`
+      : "尚未检查更新";
+  }
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
 }
 
 function renderDiagnosticCard(node) {
@@ -828,6 +874,7 @@ async function loadState() {
     state.dashboard = dashboard;
     await loadInstallProfile();
     await loadAuditLogs();
+    await loadOps();
     setConnection(true, `已同步 · ${new Date(dashboard.generatedAt).toLocaleTimeString()}`);
     render();
     connectEvents();
@@ -854,12 +901,35 @@ async function loadAuditLogs() {
   }
 }
 
+async function loadOps() {
+  try {
+    const [security, backups, update] = await Promise.all([
+      apiFetch("/api/security/status"),
+      apiFetch("/api/backups"),
+      apiFetch("/api/update/check"),
+    ]);
+    state.opsStatus = security;
+    state.backups = backups.backups ?? [];
+    state.updateStatus = update;
+  } catch {
+    state.opsStatus = null;
+    state.backups = [];
+    state.updateStatus = null;
+  }
+}
+
 function connectEvents() {
   if (state.eventSource) return;
   const url = `${apiUrl("/api/events")}?token=${encodeURIComponent(state.config.token)}`;
   state.eventSource = new EventSource(url);
   state.eventSource.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      scheduleStateRefresh(1000);
+      return;
+    }
     if (payload.type === "state" && payload.state) {
       state.dashboard = payload.state;
       notifyUnreadChanges(payload.state);
@@ -996,6 +1066,31 @@ async function testPush() {
   showToast("测试通知已提交");
 }
 
+async function createBackup() {
+  const payload = await apiFetch("/api/backups/create", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  showToast(`备份已创建：${payload.backup?.name || ""}`);
+  await loadOps();
+  renderOpsStatus();
+}
+
+async function restoreBackup(name) {
+  await apiFetch("/api/backups/restore", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  showToast("备份已恢复，状态已重新加载");
+  await loadState();
+}
+
+async function checkUpdate() {
+  state.updateStatus = await apiFetch("/api/update/check");
+  showToast(state.updateStatus.updateAvailable ? "发现可用更新" : "已经是最新版本");
+  renderOpsStatus();
+}
+
 async function autoRegisterFirebaseMessaging() {
   try {
     if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
@@ -1066,6 +1161,8 @@ dom.closeDetailBtn.addEventListener("click", () => dom.detailPane.classList.remo
 dom.markAllReadBtn?.addEventListener("click", markAllNotificationsRead);
 dom.registerPushBtn?.addEventListener("click", registerPushToken);
 dom.testPushBtn?.addEventListener("click", testPush);
+dom.createBackupBtn?.addEventListener("click", createBackup);
+dom.checkUpdateBtn?.addEventListener("click", checkUpdate);
 dom.rotateInstallKeyBtn?.addEventListener("click", async () => {
   if (confirm("确定轮换安装密钥？旧安装命令会立刻失效，已经登记的电脑不受影响。")) {
     await rotateInstallKey();
@@ -1167,6 +1264,14 @@ document.addEventListener("click", async (event) => {
     if (target) {
       await navigator.clipboard.writeText(target.value);
       showToast("已复制");
+    }
+  }
+
+  const restoreButton = event.target.closest("[data-restore-backup]");
+  if (restoreButton) {
+    const name = restoreButton.dataset.restoreBackup;
+    if (confirm(`确定恢复备份 ${name}？系统会先创建一份恢复前备份。`)) {
+      await restoreBackup(name);
     }
   }
 });

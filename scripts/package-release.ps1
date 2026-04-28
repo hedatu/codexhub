@@ -1,6 +1,7 @@
 param(
   [string]$Version = "0.4.9",
-  [string]$FarfieldVersion = "0.2.2"
+  [string]$FarfieldVersion = "0.2.2",
+  [string]$NodeVersion = "20.18.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -115,6 +116,36 @@ function Install-WindowsNodeRuntimePackage($target) {
   Copy-Item -LiteralPath $node.Source -Destination (Join-Path $runtimeDir "node.exe") -Force
 }
 
+function Install-UnixNodeRuntimePackage($target, $platform, $goArch, $nodeArch) {
+  $nodeTarget = Join-Path $target "node-runtime\$platform-$goArch"
+  $nodeBin = Join-Path $nodeTarget "bin\node"
+  if (Test-Path -LiteralPath $nodeBin) {
+    return
+  }
+  if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {
+    Write-Warning "tar.exe was not found; $target will not include Node runtime for $platform-$goArch."
+    return
+  }
+  $archiveName = "node-v$NodeVersion-$platform-$nodeArch.tar.xz"
+  $url = "https://nodejs.org/dist/v$NodeVersion/$archiveName"
+  $cacheDir = Join-Path $env:TEMP "codexhub-node-runtime"
+  $archive = Join-Path $cacheDir $archiveName
+  $extract = Join-Path $cacheDir "$platform-$nodeArch"
+  New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+  if (-not (Test-Path -LiteralPath $archive)) {
+    Invoke-WebRequest -Uri $url -OutFile $archive
+  }
+  Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force -Path $extract | Out-Null
+  & tar.exe -xJf $archive -C $extract --strip-components=1 --exclude "*/bin/npm" --exclude "*/bin/npx" --exclude "*/bin/corepack"
+  if (-not (Test-Path -LiteralPath (Join-Path $extract "bin\node"))) {
+    throw "Failed to extract Node runtime from $archive"
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $nodeTarget) | Out-Null
+  Remove-Item -LiteralPath $nodeTarget -Recurse -Force -ErrorAction SilentlyContinue
+  Copy-Item -LiteralPath $extract -Destination $nodeTarget -Recurse -Force
+}
+
 $sourceDir = Join-Path $stage "codexhub-source-v$Version"
 Copy-Items $common $sourceDir
 Compress-Archive -Path (Join-Path $sourceDir "*") -DestinationPath (Join-Path $dist "codexhub-source-v$Version.zip") -Force
@@ -185,6 +216,8 @@ Copy-Items @(
 ) $linuxAgentDir
 Copy-GoBinaries @("codexhub-agent-linux-*", "codexhub-farfield-linux-*") $linuxAgentDir
 Install-FarfieldRuntimePackage $linuxAgentDir
+Install-UnixNodeRuntimePackage $linuxAgentDir "linux" "amd64" "x64"
+Install-UnixNodeRuntimePackage $linuxAgentDir "linux" "arm64" "arm64"
 Compress-Archive -Path (Join-Path $linuxAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-linux-agent-v$Version.zip") -Force
 
 $macosAgentDir = Join-Path $stage "codexhub-macos-agent-v$Version"
@@ -203,6 +236,8 @@ Copy-Items @(
 ) $macosAgentDir
 Copy-GoBinaries @("codexhub-agent-darwin-*", "codexhub-farfield-darwin-*") $macosAgentDir
 Install-FarfieldRuntimePackage $macosAgentDir
+Install-UnixNodeRuntimePackage $macosAgentDir "darwin" "amd64" "x64"
+Install-UnixNodeRuntimePackage $macosAgentDir "darwin" "arm64" "arm64"
 Compress-Archive -Path (Join-Path $macosAgentDir "*") -DestinationPath (Join-Path $dist "codexhub-macos-agent-v$Version.zip") -Force
 
 $androidDir = Join-Path $stage "codexhub-android-twa-v$Version"

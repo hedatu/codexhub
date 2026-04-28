@@ -32,11 +32,6 @@ if [ -z "$SERVER" ] || [ -z "$INSTALL_KEY" ]; then
   exit 1
 fi
 
-if [ "$NO_FARFIELD" -eq 0 ] && ! command -v node >/dev/null 2>&1; then
-  echo "Node.js 20+ is required to run bundled Farfield." >&2
-  exit 1
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_SOURCE="$REPO_ROOT/src/desktop-agent/agent.mjs"
@@ -48,6 +43,10 @@ case "$ARCH" in
 esac
 
 mkdir -p "$INSTALL_DIR/src/desktop-agent" "$INSTALL_DIR/bin" "$CONFIG_DIR" "$LOG_DIR"
+if [ -d "$REPO_ROOT/node-runtime" ]; then
+  rm -rf "$INSTALL_DIR/node-runtime"
+  cp -R "$REPO_ROOT/node-runtime" "$INSTALL_DIR/node-runtime"
+fi
 cat > "$INSTALL_DIR/install-preflight.json" <<EOF_PREFLIGHT
 {
   "os": "macos",
@@ -94,6 +93,9 @@ if [ "$NO_FARFIELD" -eq 0 ]; then
     FARFIELD_BIN="$INSTALL_DIR/bin/codexhub-farfield"
     cp "$REPO_ROOT/bin/codexhub-farfield-darwin-$GO_ARCH" "$FARFIELD_BIN"
     chmod +x "$FARFIELD_BIN"
+  elif ! command -v node >/dev/null 2>&1; then
+    echo "Node.js 20+ is required when the Go Farfield launcher is not packaged." >&2
+    exit 1
   fi
 fi
 

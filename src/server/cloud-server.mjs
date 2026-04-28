@@ -1,5 +1,6 @@
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -19,11 +20,13 @@ const DATA_FILE = process.env.CODEXHUB_DATA_FILE
 const OFFLINE_AFTER_MS = Number(process.env.CODEXHUB_OFFLINE_AFTER_MS ?? 45_000);
 const COMMAND_TTL_MS = Number(process.env.CODEXHUB_COMMAND_TTL_MS ?? 10 * 60_000);
 const COMMAND_LEASE_MS = Number(process.env.CODEXHUB_COMMAND_LEASE_MS ?? 60_000);
+const FULL_CONTEXT_TTL_MS = Number(process.env.CODEXHUB_FULL_CONTEXT_TTL_MS ?? 30 * 60_000);
 const RELEASE_VERSION = process.env.CODEXHUB_VERSION ?? "0.4.9";
 const STORAGE_DRIVER = (process.env.CODEXHUB_STORAGE ?? "json").toLowerCase();
 const SQLITE_FILE = process.env.CODEXHUB_SQLITE_FILE
   ? path.resolve(process.env.CODEXHUB_SQLITE_FILE)
   : path.join(ROOT, "data", "codexhub.db");
+const BACKUP_DIR = process.env.CODEXHUB_BACKUP_DIR ? path.resolve(process.env.CODEXHUB_BACKUP_DIR) : path.join(ROOT, "backups");
 const PUSH_WEBHOOK_URL = process.env.CODEXHUB_PUSH_WEBHOOK_URL ?? "";
 const FCM_SERVICE_ACCOUNT_FILE = process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_FILE ? path.resolve(process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_FILE) : "";
 const FCM_SERVICE_ACCOUNT_JSON = process.env.CODEXHUB_FCM_SERVICE_ACCOUNT_JSON ?? "";
@@ -32,6 +35,7 @@ const FIREBASE_WEB_CONFIG = process.env.CODEXHUB_FIREBASE_WEB_CONFIG ?? "";
 const FIREBASE_VAPID_KEY = process.env.CODEXHUB_FIREBASE_VAPID_KEY ?? "";
 const AGENT_UPDATE_POLICY = process.env.CODEXHUB_AGENT_UPDATE_POLICY ?? "prompt";
 const REPORT_TZ_OFFSET_MINUTES = Number(process.env.CODEXHUB_REPORT_TZ_OFFSET_MINUTES ?? 480);
+const RELEASE_MANIFEST_URL = process.env.CODEXHUB_RELEASE_MANIFEST_URL ?? "";
 const SQLITE_MIN_PERSIST_MS = Number(process.env.CODEXHUB_SQLITE_MIN_PERSIST_MS ?? 15_000);
 let sqliteAvailable = null;
 let lastSqlitePersistAt = 0;
@@ -169,7 +173,16 @@ function loadState() {
 }
 
 function persistState() {
-  const payload = {
+  const payload = persistedStatePayload();
+  if (DATA_FILE) {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2));
+  }
+  persistSqliteState(payload);
+}
+
+function persistedStatePayload() {
+  return {
     savedAt: nowIso(),
     schemaVersion: 2,
     storageDriver: STORAGE_DRIVER,
@@ -182,11 +195,6 @@ function persistState() {
       commands: node.commands.filter((command) => command.status !== "done"),
     })),
   };
-  if (DATA_FILE) {
-    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2));
-  }
-  persistSqliteState(payload);
 }
 
 function persistSqliteState(payload) {
@@ -294,12 +302,32 @@ function recordProposalAudit(event, actor, nodeId, threadId, proposal, commandId
     contextSignature: proposal.contextSignature ?? "",
     proposal,
   };
+  entry.previousHash = state.proposalAudits.at(-1)?.entryHash ?? "";
+  entry.entryHash = proposalAuditEntryHash(entry);
   state.proposalAudits.push(entry);
   if (state.proposalAudits.length > 500) {
     state.proposalAudits.splice(0, state.proposalAudits.length - 500);
   }
   sendEvent({ type: "proposalAudit", entry });
   return entry;
+}
+
+function proposalAuditEntryHash(entry) {
+  return createHash("sha256").update(JSON.stringify({
+    id: entry.id,
+    at: entry.at,
+    event: entry.event,
+    nodeId: entry.nodeId,
+    threadId: entry.threadId,
+    proposalId: entry.proposalId,
+    actor: entry.actor,
+    risk: entry.risk,
+    decision: entry.decision,
+    commandId: entry.commandId,
+    contextSignature: entry.contextSignature,
+    previousHash: entry.previousHash,
+    proposal: entry.proposal,
+  })).digest("hex");
 }
 
 function storageStatus() {
@@ -315,6 +343,108 @@ function storageStatus() {
         : "SQLite mode is configured but sqlite3 was not found; install sqlite3 or switch back to JSON."
       : "JSON file mode is active. Set CODEXHUB_STORAGE=sqlite in a future migration window to enable SQLite-backed history.",
   };
+}
+
+function listBackups() {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  return fs.readdirSync(BACKUP_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.startsWith("codexhub-backup-") && entry.name.endsWith(".tar.gz"))
+    .map((entry) => {
+      const file = path.join(BACKUP_DIR, entry.name);
+      const stat = fs.statSync(file);
+      return { name: entry.name, size: stat.size, modifiedAt: stat.mtime.toISOString() };
+    })
+    .sort((a, b) => String(b.modifiedAt).localeCompare(String(a.modifiedAt)));
+}
+
+function createBackup(reason = "manual") {
+  persistState();
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const targetDir = path.join(BACKUP_DIR, stamp);
+  fs.mkdirSync(targetDir, { recursive: true });
+  if (DATA_FILE && fs.existsSync(DATA_FILE)) {
+    fs.copyFileSync(DATA_FILE, path.join(targetDir, "codexhub-state.json"));
+  }
+  if (fs.existsSync(SQLITE_FILE)) {
+    const sqliteTarget = path.join(targetDir, "codexhub.db");
+    if (sqliteCanRun()) {
+      spawnSync("sqlite3", [SQLITE_FILE, `.backup '${sqliteTarget}'`], { stdio: "ignore" });
+    }
+    if (!fs.existsSync(sqliteTarget)) fs.copyFileSync(SQLITE_FILE, sqliteTarget);
+  }
+  fs.writeFileSync(path.join(targetDir, "manifest.json"), JSON.stringify({ createdAt: nowIso(), reason, version: RELEASE_VERSION, storage: storageStatus() }, null, 2));
+  const archive = path.join(BACKUP_DIR, `codexhub-backup-${stamp}.tar.gz`);
+  const result = spawnSync("tar", ["-C", BACKUP_DIR, "-czf", archive, stamp], { encoding: "utf8" });
+  fs.rmSync(targetDir, { recursive: true, force: true });
+  if (result.status !== 0) throw new Error(result.stderr || "tar backup failed");
+  const stat = fs.statSync(archive);
+  return { name: path.basename(archive), size: stat.size, modifiedAt: stat.mtime.toISOString() };
+}
+
+function restoreBackup(name) {
+  const safeName = path.basename(String(name || ""));
+  if (!safeName.startsWith("codexhub-backup-") || !safeName.endsWith(".tar.gz")) {
+    throw new Error("Invalid backup name");
+  }
+  const source = path.join(BACKUP_DIR, safeName);
+  if (!fs.existsSync(source)) throw new Error(`Backup not found: ${safeName}`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codexhub-restore-"));
+  try {
+    const result = spawnSync("tar", ["-xzf", source, "-C", tmp], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr || "tar restore failed");
+    let jsonSource = "";
+    let sqliteSource = "";
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.name === "codexhub-state.json") jsonSource = file;
+        else if (entry.name === "codexhub.db") sqliteSource = file;
+      }
+    };
+    walk(tmp);
+    if (sqliteSource) {
+      fs.mkdirSync(path.dirname(SQLITE_FILE), { recursive: true });
+      fs.copyFileSync(sqliteSource, SQLITE_FILE);
+    }
+    if (jsonSource && DATA_FILE) {
+      fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+      fs.copyFileSync(jsonSource, DATA_FILE);
+    }
+    if (!sqliteSource && !jsonSource) throw new Error("Backup does not contain CodexHub data files");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function fetchLatestRelease() {
+  if (RELEASE_MANIFEST_URL) {
+    const response = await fetch(RELEASE_MANIFEST_URL);
+    if (!response.ok) throw new Error(`GET ${RELEASE_MANIFEST_URL} failed: ${response.status}`);
+    const manifest = await response.json();
+    return { latestVersion: String(manifest.version || "").replace(/^v/, ""), assets: manifest.assets || [], source: RELEASE_MANIFEST_URL };
+  }
+  const source = "https://api.github.com/repos/hedatu/codexhub/releases/latest";
+  const response = await fetch(source, { headers: { "user-agent": `CodexHub/${RELEASE_VERSION}` } });
+  if (!response.ok) throw new Error(`GET ${source} failed: ${response.status}`);
+  const release = await response.json();
+  return {
+    latestVersion: String(release.tag_name || "").replace(/^v/, ""),
+    source: release.html_url || source,
+    assets: (release.assets || []).map((asset) => ({ name: asset.name, url: asset.browser_download_url, size: asset.size })),
+  };
+}
+
+function compareVersions(a, b) {
+  const parse = (value) => String(value || "").replace(/^v/, "").split(".").slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(a);
+  const right = parse(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] > right[i]) return 1;
+    if (left[i] < right[i]) return -1;
+  }
+  return 0;
 }
 
 async function readBody(req) {
@@ -584,6 +714,7 @@ function contextKey(nodeId, threadId) {
 function fullContextFromCommandResult(nodeId, fallbackThreadId, body) {
   const result = body?.result;
   if (!result || typeof result !== "object") return null;
+  const cachedAt = nowIso();
   const fullContext = {
     ...result,
     threadId: String(result.threadId || fallbackThreadId || ""),
@@ -591,6 +722,8 @@ function fullContextFromCommandResult(nodeId, fallbackThreadId, body) {
     mode: result.mode || "full",
     messages: Array.isArray(result.messages) ? result.messages : [],
     collectedAt: result.collectedAt || nowIso(),
+    cachedAt,
+    expiresAt: FULL_CONTEXT_TTL_MS > 0 ? new Date(Date.now() + FULL_CONTEXT_TTL_MS).toISOString() : "",
   };
   if (!fullContext.threadId) return null;
   fullContext.messageCount = Number.isFinite(Number(result.messageCount))
@@ -599,6 +732,12 @@ function fullContextFromCommandResult(nodeId, fallbackThreadId, body) {
   fullContext.truncated = Boolean(result.truncated);
   fullContext.redacted = Boolean(result.redacted);
   return fullContext;
+}
+
+function fullContextExpired(fullContext) {
+  if (!fullContext?.expiresAt) return false;
+  const expiresAt = Date.parse(fullContext.expiresAt);
+  return Number.isFinite(expiresAt) && Date.now() >= expiresAt;
 }
 
 function sortThreads(threads) {
@@ -1414,6 +1553,96 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/security/status") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        const nodes = [...state.nodes.values()];
+        writeJson(res, 200, {
+          ok: true,
+          auth: {
+            adminTokenConfigured: Boolean(ADMIN_TOKEN && ADMIN_TOKEN !== "dev-token"),
+            readonlyTokenConfigured: Boolean(READONLY_TOKEN),
+            installKeyConfigured: Boolean(state.installKey),
+          },
+          devices: {
+            total: nodes.length,
+            revoked: nodes.filter((node) => node.revokedAt).length,
+            active: nodes.filter((node) => !node.revokedAt).length,
+          },
+          push: {
+            webhookConfigured: Boolean(PUSH_WEBHOOK_URL),
+            fcmConfigured: fcmConfigured(),
+            firebaseWebConfigured: Boolean(FIREBASE_WEB_CONFIG && FIREBASE_VAPID_KEY),
+            subscriptions: state.pushSubscriptions.filter((item) => !item.revokedAt).length,
+            serviceAccountFile: FCM_SERVICE_ACCOUNT_FILE || null,
+          },
+          storage: storageStatus(),
+          backups: { dir: BACKUP_DIR },
+          auditLog: { entries: state.auditLogs.length },
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/backups") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        writeJson(res, 200, { ok: true, backupDir: BACKUP_DIR, backups: listBackups() });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/backups/create") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        const backup = createBackup("manual");
+        recordAudit("backup.created", "admin", { name: backup.name, size: backup.size });
+        persistState();
+        writeJson(res, 200, { ok: true, backup });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/backups/restore") {
+        if (!isAdminAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        const body = await readBody(req);
+        createBackup("pre-restore");
+        restoreBackup(body.name);
+        loadState();
+        recordAudit("backup.restored", "admin", { name: path.basename(String(body.name || "")) });
+        persistState();
+        sendEvent({ type: "state", state: dashboardState() });
+        writeJson(res, 200, { ok: true, restored: path.basename(String(body.name || "")) });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/update/check") {
+        if (!isReadAuthed(req, url)) {
+          writeJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
+        try {
+          const latest = await fetchLatestRelease();
+          writeJson(res, 200, {
+            ok: true,
+            currentVersion: RELEASE_VERSION,
+            latestVersion: latest.latestVersion,
+            updateAvailable: compareVersions(latest.latestVersion, RELEASE_VERSION) > 0,
+            source: latest.source,
+            assets: latest.assets,
+          });
+        } catch (error) {
+          writeJson(res, 200, { ok: true, currentVersion: RELEASE_VERSION, updateAvailable: false, error: error.message });
+        }
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/reports/daily") {
         if (!isReadAuthed(req, url)) {
           writeJson(res, 401, { ok: false, error: "Unauthorized" });
@@ -1669,6 +1898,23 @@ const server = http.createServer(async (req, res) => {
           }
           const fullContext = state.fullContexts.get(contextKey(nodeId, threadId));
           if (fullContext) {
+            if (fullContextExpired(fullContext)) {
+              state.fullContexts.delete(contextKey(nodeId, threadId));
+              recordAudit("thread.context.expired", "admin", {
+                nodeId,
+                threadId,
+                mode: "full",
+                contextSignature: fullContext.contextSignature ?? "",
+              });
+              writeJson(res, 202, {
+                ok: true,
+                mode: "full",
+                status: "expired",
+                contextBundle,
+                message: "Full context cache expired. POST context-request again.",
+              });
+              return;
+            }
             recordAudit("thread.context.read", "admin", {
               nodeId,
               threadId,
@@ -1704,6 +1950,24 @@ const server = http.createServer(async (req, res) => {
           const contextBundle = buildThreadContextBundle(node, thread);
           const maxMessages = clampNumber(body.maxMessages ?? body.limit, 200, 1, 2000);
           const maxChars = clampNumber(body.maxChars, 240000, 1000, 2_000_000);
+          cleanupCommands(node);
+          const existingCommand = (node.commands ?? []).find((command) => (
+            (command.status === "queued" || command.status === "leased") &&
+            command.action?.kind === "readThreadContext" &&
+            command.action?.threadId === threadId
+          ));
+          if (existingCommand) {
+            recordAudit("thread.context.requested.duplicate", "admin", {
+              nodeId,
+              threadId,
+              commandId: existingCommand.id,
+              mode: "full",
+              contextSignature: contextBundle.contextSignature,
+            });
+            persistState();
+            writeJson(res, 202, { ok: true, mode: "full", status: "queued", deduped: true, command: existingCommand, contextBundle });
+            return;
+          }
           const command = queueCommand(node, {
             kind: "readThreadContext",
             provider: thread.provider ?? "codex",
@@ -1728,17 +1992,48 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        if (req.method === "POST" && parts[3] === "threads" && parts[4] && parts[5] === "context-clear") {
+          if (!isAdminAuthed(req, url)) {
+            writeJson(res, 401, { ok: false, error: "Unauthorized" });
+            return;
+          }
+          const threadId = decodeURIComponent(parts[4]);
+          const key = contextKey(nodeId, threadId);
+          const existed = state.fullContexts.has(key);
+          state.fullContexts.delete(key);
+          recordAudit("thread.context.cleared", "admin", { nodeId, threadId, mode: "full", existed });
+          persistState();
+          writeJson(res, 200, { ok: true, mode: "full", status: "cleared", existed });
+          return;
+        }
+
         if (req.method === "GET" && parts[3] === "threads" && parts[4] && parts[5] === "proposals") {
           if (!isAdminAuthed(req, url)) {
             writeJson(res, 401, { ok: false, error: "Unauthorized" });
             return;
           }
           const threadId = decodeURIComponent(parts[4]);
-          const proposals = [...state.agentProposals.values()].filter((proposal) => proposal.nodeId === nodeId && proposal.threadId === threadId);
-          const audits = [...state.proposalAudits]
+          const limit = clampNumber(url.searchParams.get("limit"), 50, 1, 200);
+          const offset = clampNumber(url.searchParams.get("offset"), 0, 0, 10000);
+          const eventFilter = String(url.searchParams.get("event") || "").trim();
+          const decisionFilter = String(url.searchParams.get("decision") || "").trim();
+          const proposalIdFilter = String(url.searchParams.get("proposalId") || "").trim();
+          const proposals = [...state.agentProposals.values()].filter((proposal) => (
+            proposal.nodeId === nodeId &&
+            proposal.threadId === threadId &&
+            (!proposalIdFilter || proposal.proposalId === proposalIdFilter)
+          ));
+          const matchedAudits = [...state.proposalAudits]
             .reverse()
-            .filter((entry) => entry.nodeId === nodeId && entry.threadId === threadId);
-          writeJson(res, 200, { ok: true, nodeId, threadId, proposals, audits });
+            .filter((entry) => (
+              entry.nodeId === nodeId &&
+              entry.threadId === threadId &&
+              (!eventFilter || entry.event === eventFilter) &&
+              (!decisionFilter || entry.decision === decisionFilter) &&
+              (!proposalIdFilter || entry.proposalId === proposalIdFilter)
+            ));
+          const audits = matchedAudits.slice(offset, offset + limit);
+          writeJson(res, 200, { ok: true, nodeId, threadId, proposals, audits, totalAudits: matchedAudits.length, limit, offset });
           return;
         }
 
@@ -1748,7 +2043,7 @@ const server = http.createServer(async (req, res) => {
             return;
           }
           const action = await readBody(req);
-          const allowed = ["sendMessage", "interrupt", "submitUserInput", "refresh"];
+          const allowed = ["sendMessage", "interrupt", "submitUserInput", "refresh", "selfUpdate"];
           if (!allowed.includes(action.kind)) {
             writeJson(res, 400, { ok: false, error: `Unsupported action kind: ${action.kind}` });
             return;

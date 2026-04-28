@@ -165,7 +165,8 @@ if (-not $NoScheduledTask) {
     Install-FarfieldRuntime -SourceRoot $repoRoot -TargetDir $runtimeDir -Version $FarfieldVersion
     if (Test-Path -LiteralPath $farfieldExe) {
       $farfieldArgs = "--runtime `"$runtimeDir`" --codex-cli `"$wrapperPath`" --port 4311 --cwd `"$env:USERPROFILE`" --log-dir `"$logDir`""
-      $farfieldAction = New-ScheduledTaskAction -Execute $farfieldExe -Argument $farfieldArgs
+      $farfieldCommand = "& '$farfieldExe' $farfieldArgs"
+      $farfieldAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command $farfieldCommand"
     } else {
       $farfieldCli = Join-Path $runtimeDir "node_modules\@farfield\server\dist\cli.js"
       $nodePath = Resolve-Node
@@ -177,7 +178,8 @@ if (-not $NoScheduledTask) {
     Start-ScheduledTask -TaskName "CodexHubFarfield" -ErrorAction Stop
   }
 
-  $action = New-ScheduledTaskAction -Execute $agentCommand -Argument $args
+  $agentPsCommand = "& '$agentCommand' $args"
+  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command $agentPsCommand"
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
   Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
