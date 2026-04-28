@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -10,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -49,10 +52,13 @@ type serverConfig struct {
 	FCMProjectID          string
 	FirebaseWebConfig     string
 	FirebaseVapidKey      string
+	BackupDir             string
+	ReleaseManifestURL    string
 	SQLiteMinPersist      time.Duration
 	OfflineAfter          time.Duration
 	CommandTTL            time.Duration
 	CommandLease          time.Duration
+	FullContextTTL        time.Duration
 }
 
 type appState struct {
@@ -149,10 +155,13 @@ func loadConfig() serverConfig {
 		FCMProjectID:          strings.TrimSpace(os.Getenv("CODEXHUB_FCM_PROJECT_ID")),
 		FirebaseWebConfig:     strings.TrimSpace(os.Getenv("CODEXHUB_FIREBASE_WEB_CONFIG")),
 		FirebaseVapidKey:      strings.TrimSpace(os.Getenv("CODEXHUB_FIREBASE_VAPID_KEY")),
+		BackupDir:             env("CODEXHUB_BACKUP_DIR", filepath.Join(root, "backups")),
+		ReleaseManifestURL:    strings.TrimSpace(os.Getenv("CODEXHUB_RELEASE_MANIFEST_URL")),
 		SQLiteMinPersist:      envDuration("CODEXHUB_SQLITE_MIN_PERSIST_MS", 15*time.Second),
 		OfflineAfter:          envDuration("CODEXHUB_OFFLINE_AFTER_MS", 45*time.Second),
 		CommandTTL:            envDuration("CODEXHUB_COMMAND_TTL_MS", 10*time.Minute),
 		CommandLease:          envDuration("CODEXHUB_COMMAND_LEASE_MS", time.Minute),
+		FullContextTTL:        envDuration("CODEXHUB_FULL_CONTEXT_TTL_MS", 30*time.Minute),
 	}
 }
 
@@ -276,6 +285,16 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.handlePushRegister(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/push/test":
 		s.handlePushTest(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/security/status":
+		s.handleSecurityStatus(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/backups":
+		s.handleBackupsList(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/backups/create":
+		s.handleBackupCreate(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/backups/restore":
+		s.handleBackupRestore(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/update/check":
+		s.handleUpdateCheck(w, r)
 	default:
 		s.handleNodeAPI(w, r)
 	}
@@ -418,6 +437,134 @@ func (s *server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 		"createdAt": nowISO(),
 	})
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "queued": true})
+}
+
+func (s *server) handleSecurityStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	s.state.mu.RLock()
+	nodes := len(s.state.nodes)
+	revoked := 0
+	for _, node := range s.state.nodes {
+		if node.RevokedAt != "" {
+			revoked++
+		}
+	}
+	subscriptions := 0
+	for _, item := range s.state.pushSubscriptions {
+		if item.RevokedAt == "" {
+			subscriptions++
+		}
+	}
+	auditCount := len(s.state.auditLogs)
+	s.state.mu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"auth": map[string]any{
+			"adminTokenConfigured":    s.cfg.AdminToken != "" && s.cfg.AdminToken != "dev-token",
+			"readonlyTokenConfigured": s.cfg.ReadonlyToken != "",
+			"installKeyConfigured":    s.currentInstallKey() != "",
+		},
+		"devices": map[string]any{"total": nodes, "revoked": revoked, "active": nodes - revoked},
+		"push": map[string]any{
+			"webhookConfigured":     s.cfg.PushWebhookURL != "",
+			"fcmConfigured":         s.fcmConfigured(),
+			"firebaseWebConfigured": s.cfg.FirebaseWebConfig != "" && s.cfg.FirebaseVapidKey != "",
+			"subscriptions":         subscriptions,
+			"serviceAccountFile":    nullableString(s.cfg.FCMServiceAccountFile),
+		},
+		"storage":  s.storageStatus(),
+		"backups":  map[string]any{"dir": s.cfg.BackupDir},
+		"auditLog": map[string]any{"entries": auditCount},
+	})
+}
+
+func (s *server) handleBackupsList(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	backups, err := s.listBackups()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody(err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "backupDir": s.cfg.BackupDir, "backups": backups})
+}
+
+func (s *server) handleBackupCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	backup, err := s.createBackup("manual")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody(err.Error()))
+		return
+	}
+	s.state.mu.Lock()
+	s.recordAuditLocked("backup.created", "admin", map[string]any{"name": backup["name"], "size": backup["size"]})
+	s.state.mu.Unlock()
+	s.persistState()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "backup": backup})
+}
+
+func (s *server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	var body map[string]any
+	_ = readJSON(r, &body)
+	name := filepath.Base(strings.TrimSpace(stringValue(body["name"])))
+	if name == "." || name == "" || !strings.HasPrefix(name, "codexhub-backup-") || !strings.HasSuffix(name, ".tar.gz") {
+		writeJSON(w, http.StatusBadRequest, errorBody("Invalid backup name"))
+		return
+	}
+	if _, err := s.createBackup("pre-restore"); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody("Pre-restore backup failed: "+err.Error()))
+		return
+	}
+	if err := s.restoreBackup(name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody(err.Error()))
+		return
+	}
+	if err := s.loadState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody("Backup restored but state reload failed: "+err.Error()))
+		return
+	}
+	s.state.mu.Lock()
+	s.recordAuditLocked("backup.restored", "admin", map[string]any{"name": name})
+	s.state.mu.Unlock()
+	s.persistState()
+	s.sendEvent(map[string]any{"type": "state", "state": s.dashboardState()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restored": name})
+}
+
+func (s *server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.isReadAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	current := env("CODEXHUB_VERSION", version)
+	if current == "" || current == "dev" {
+		current = "0.4.9"
+	}
+	latestVersion, assets, source, err := s.fetchLatestRelease()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "currentVersion": current, "updateAvailable": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"currentVersion":  current,
+		"latestVersion":   latestVersion,
+		"updateAvailable": compareVersions(latestVersion, current) > 0,
+		"source":          source,
+		"assets":          assets,
+	})
 }
 
 func (s *server) notificationPayload(nodeID string, publicNode map[string]any, notice codexhub.Notification) map[string]any {
@@ -737,6 +884,8 @@ func (s *server) handleNodeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleThreadContextBundle(w, r, nodeID, parts[4])
 	case r.Method == http.MethodPost && action == "threads" && len(parts) >= 6 && parts[5] == "context-request":
 		s.handleThreadContextRequest(w, r, nodeID, parts[4])
+	case r.Method == http.MethodPost && action == "threads" && len(parts) >= 6 && parts[5] == "context-clear":
+		s.handleThreadContextClear(w, r, nodeID, parts[4])
 	case r.Method == http.MethodGet && action == "threads" && len(parts) >= 6 && parts[5] == "proposals":
 		s.handleThreadProposals(w, r, nodeID, parts[4])
 	case r.Method == http.MethodPost && action == "notifications" && len(parts) >= 5 && parts[4] == "read":
@@ -918,7 +1067,7 @@ func (s *server) handleQueueAction(w http.ResponseWriter, r *http.Request, nodeI
 		return
 	}
 	kind := stringValue(action["kind"])
-	if !map[string]bool{"sendMessage": true, "interrupt": true, "submitUserInput": true, "refresh": true}[kind] {
+	if !map[string]bool{"sendMessage": true, "interrupt": true, "submitUserInput": true, "refresh": true, "selfUpdate": true}[kind] {
 		writeJSON(w, http.StatusBadRequest, errorBody("Unsupported action kind: "+kind))
 		return
 	}
@@ -1000,14 +1149,18 @@ func (s *server) handleAgentDraft(w http.ResponseWriter, r *http.Request, nodeID
 
 func (s *server) handleThreadContextBundle(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
 	mode := strings.ToLower(firstNonEmptyString(r.URL.Query().Get("mode"), "compressed"))
+	actor := "readonly"
 	if mode == "full" {
 		if !s.isAdminAuthed(r) {
 			writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 			return
 		}
+		actor = "admin"
 	} else if !s.isReadAuthed(r) {
 		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
 		return
+	} else if s.isAdminAuthed(r) {
+		actor = "admin"
 	}
 	threadID := decodedPathPart(encodedThreadID)
 	s.state.mu.Lock()
@@ -1025,13 +1178,20 @@ func (s *server) handleThreadContextBundle(w http.ResponseWriter, r *http.Reques
 	}
 	contextBundle := s.buildThreadContextBundleLocked(node, thread)
 	if mode != "full" {
-		s.recordAuditLocked("thread.context.read", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "compressed", "contextSignature": contextBundle.ContextSignature})
+		s.recordAuditLocked("thread.context.read", actor, map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "compressed", "contextSignature": contextBundle.ContextSignature})
 		s.state.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "compressed", "status": "ready", "contextBundle": contextBundle})
 		return
 	}
 	fullContext, ready := s.state.fullContexts[contextKey(nodeID, threadID)]
 	if ready {
+		if fullContextExpired(fullContext) {
+			delete(s.state.fullContexts, contextKey(nodeID, threadID))
+			s.recordAuditLocked("thread.context.expired", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "full", "contextSignature": fullContext.ContextSignature})
+			s.state.mu.Unlock()
+			writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "mode": "full", "status": "expired", "contextBundle": contextBundle, "message": "Full context cache expired. POST context-request again."})
+			return
+		}
 		s.recordAuditLocked("thread.context.read", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "full", "contextSignature": fullContext.ContextSignature})
 		s.state.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "full", "status": "ready", "contextBundle": contextBundle, "fullContext": fullContext})
@@ -1066,6 +1226,16 @@ func (s *server) handleThreadContextRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	contextBundle := s.buildThreadContextBundleLocked(node, thread)
+	s.cleanupCommandsLocked(node)
+	for _, command := range node.Commands {
+		if (command.Status == "queued" || command.Status == "leased") && stringValue(command.Action["kind"]) == "readThreadContext" && stringValue(command.Action["threadId"]) == threadID {
+			s.recordAuditLocked("thread.context.requested.duplicate", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "commandId": command.ID, "mode": "full", "contextSignature": contextBundle.ContextSignature})
+			s.state.mu.Unlock()
+			s.persistState()
+			writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "mode": "full", "status": "queued", "deduped": true, "command": command, "contextBundle": contextBundle})
+			return
+		}
+	}
 	action := map[string]any{
 		"kind":        "readThreadContext",
 		"provider":    firstNonEmptyString(thread.Provider, "codex"),
@@ -1077,12 +1247,26 @@ func (s *server) handleThreadContextRequest(w http.ResponseWriter, r *http.Reque
 	}
 	command := codexhub.Command{ID: uuid(), Status: "queued", CreatedAt: nowISO(), Action: action}
 	node.Commands = append(node.Commands, command)
-	s.cleanupCommandsLocked(node)
 	s.recordAuditLocked("thread.context.requested", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "commandId": command.ID, "mode": "full", "maxMessages": maxMessages, "maxChars": maxChars, "contextSignature": contextBundle.ContextSignature})
 	s.state.mu.Unlock()
 	s.persistState()
 	s.sendEvent(map[string]any{"type": "commandQueued", "nodeId": nodeID, "command": command})
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "mode": "full", "status": "queued", "command": command, "contextBundle": contextBundle})
+}
+
+func (s *server) handleThreadContextClear(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
+	if !s.isAdminAuthed(r) {
+		writeJSON(w, http.StatusUnauthorized, errorBody("Unauthorized"))
+		return
+	}
+	threadID := decodedPathPart(encodedThreadID)
+	s.state.mu.Lock()
+	_, existed := s.state.fullContexts[contextKey(nodeID, threadID)]
+	delete(s.state.fullContexts, contextKey(nodeID, threadID))
+	s.recordAuditLocked("thread.context.cleared", "admin", map[string]any{"nodeId": nodeID, "threadId": threadID, "mode": "full", "existed": existed})
+	s.state.mu.Unlock()
+	s.persistState()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "full", "status": "cleared", "existed": existed})
 }
 
 func (s *server) handleThreadProposals(w http.ResponseWriter, r *http.Request, nodeID string, encodedThreadID string) {
@@ -1091,22 +1275,40 @@ func (s *server) handleThreadProposals(w http.ResponseWriter, r *http.Request, n
 		return
 	}
 	threadID := decodedPathPart(encodedThreadID)
+	limit := clamp(intParam(r, "limit", 50), 1, 200)
+	offset := clamp(intParam(r, "offset", 0), 0, 10000)
+	eventFilter := strings.TrimSpace(r.URL.Query().Get("event"))
+	decisionFilter := strings.TrimSpace(r.URL.Query().Get("decision"))
+	proposalIDFilter := strings.TrimSpace(r.URL.Query().Get("proposalId"))
 	s.state.mu.RLock()
 	audits := []codexhub.ProposalAuditEntry{}
 	for i := len(s.state.proposalAudits) - 1; i >= 0; i-- {
 		entry := s.state.proposalAudits[i]
-		if entry.NodeID == nodeID && entry.ThreadID == threadID {
+		if entry.NodeID == nodeID && entry.ThreadID == threadID &&
+			(eventFilter == "" || entry.Event == eventFilter) &&
+			(decisionFilter == "" || entry.Decision == decisionFilter) &&
+			(proposalIDFilter == "" || entry.ProposalID == proposalIDFilter) {
 			audits = append(audits, entry)
 		}
 	}
+	totalAudits := len(audits)
+	if offset > len(audits) {
+		audits = []codexhub.ProposalAuditEntry{}
+	} else {
+		end := offset + limit
+		if end > len(audits) {
+			end = len(audits)
+		}
+		audits = audits[offset:end]
+	}
 	proposals := []codexhub.AgentProposal{}
 	for _, proposal := range s.state.agentProposals {
-		if proposal.NodeID == nodeID && proposal.ThreadID == threadID {
+		if proposal.NodeID == nodeID && proposal.ThreadID == threadID && (proposalIDFilter == "" || proposal.ProposalID == proposalIDFilter) {
 			proposals = append(proposals, proposal)
 		}
 	}
 	s.state.mu.RUnlock()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "nodeId": nodeID, "threadId": threadID, "proposals": proposals, "audits": audits})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "nodeId": nodeID, "threadId": threadID, "proposals": proposals, "audits": audits, "totalAudits": totalAudits, "limit": limit, "offset": offset})
 }
 
 func (s *server) handlePoll(w http.ResponseWriter, r *http.Request, nodeID string) {
@@ -1157,6 +1359,10 @@ func (s *server) handleCommandResult(w http.ResponseWriter, r *http.Request, nod
 			if stringValue(cmd.Action["kind"]) == "readThreadContext" {
 				if cmd.Status == "done" {
 					if fullContext, ok := fullContextFromCommandResult(nodeID, stringValue(cmd.Action["threadId"]), body); ok {
+						fullContext.CachedAt = nowISO()
+						if s.cfg.FullContextTTL > 0 {
+							fullContext.ExpiresAt = time.Now().UTC().Add(s.cfg.FullContextTTL).Format(time.RFC3339)
+						}
 						s.state.fullContexts[contextKey(nodeID, fullContext.ThreadID)] = fullContext
 						s.recordAuditLocked("thread.context.ready", "node", map[string]any{"nodeId": nodeID, "threadId": fullContext.ThreadID, "commandId": commandID, "messageCount": fullContext.MessageCount, "truncated": fullContext.Truncated, "redacted": fullContext.Redacted, "contextSignature": fullContext.ContextSignature})
 					}
@@ -1917,6 +2123,14 @@ func fullContextFromCommandResult(nodeID, fallbackThreadID string, body map[stri
 	return fullContext, true
 }
 
+func fullContextExpired(fullContext codexhub.FullThreadContext) bool {
+	if fullContext.ExpiresAt == "" {
+		return false
+	}
+	expiresAt, ok := parseTime(fullContext.ExpiresAt)
+	return ok && !time.Now().UTC().Before(expiresAt)
+}
+
 func (s *server) installProfile(r *http.Request) map[string]any {
 	base := s.publicBaseURL(r)
 	installKey := s.currentInstallKey()
@@ -2281,10 +2495,35 @@ func (s *server) recordProposalAuditLocked(event, actor, nodeID, threadID string
 		ContextSignature: proposal.ContextSignature,
 		Proposal:         proposal,
 	}
+	if len(s.state.proposalAudits) > 0 {
+		entry.PreviousHash = s.state.proposalAudits[len(s.state.proposalAudits)-1].EntryHash
+	}
+	entry.EntryHash = proposalAuditEntryHash(entry)
 	s.state.proposalAudits = append(s.state.proposalAudits, entry)
 	if len(s.state.proposalAudits) > 500 {
 		s.state.proposalAudits = s.state.proposalAudits[len(s.state.proposalAudits)-500:]
 	}
+}
+
+func proposalAuditEntryHash(entry codexhub.ProposalAuditEntry) string {
+	payload := map[string]any{
+		"id":               entry.ID,
+		"at":               entry.At,
+		"event":            entry.Event,
+		"nodeId":           entry.NodeID,
+		"threadId":         entry.ThreadID,
+		"proposalId":       entry.ProposalID,
+		"actor":            entry.Actor,
+		"risk":             entry.Risk,
+		"decision":         entry.Decision,
+		"commandId":        entry.CommandID,
+		"contextSignature": entry.ContextSignature,
+		"previousHash":     entry.PreviousHash,
+		"proposal":         entry.Proposal,
+	}
+	data, _ := json.Marshal(payload)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func (s *server) cleanupCommandsLocked(node *codexhub.Node) {
@@ -2322,6 +2561,164 @@ func (s *server) nodeStatusLocked(node *codexhub.Node) string {
 	return "online"
 }
 
+func (s *server) listBackups() ([]map[string]any, error) {
+	if err := os.MkdirAll(s.cfg.BackupDir, 0750); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.cfg.BackupDir)
+	if err != nil {
+		return nil, err
+	}
+	backups := []map[string]any{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "codexhub-backup-") || !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, map[string]any{"name": entry.Name(), "size": info.Size(), "modifiedAt": info.ModTime().UTC().Format(time.RFC3339)})
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		return stringValue(backups[i]["modifiedAt"]) > stringValue(backups[j]["modifiedAt"])
+	})
+	return backups, nil
+}
+
+func (s *server) createBackup(reason string) (map[string]any, error) {
+	s.persistState()
+	if err := os.MkdirAll(s.cfg.BackupDir, 0750); err != nil {
+		return nil, err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	name := fmt.Sprintf("codexhub-backup-%s.tar.gz", stamp)
+	target := filepath.Join(s.cfg.BackupDir, name)
+	tmp, err := os.MkdirTemp("", "codexhub-backup-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	payloadDir := filepath.Join(tmp, stamp)
+	if err := os.MkdirAll(payloadDir, 0750); err != nil {
+		return nil, err
+	}
+	files := []map[string]string{}
+	if s.cfg.DataFile != "" && exists(s.cfg.DataFile) {
+		if err := copyFile(s.cfg.DataFile, filepath.Join(payloadDir, "codexhub-state.json")); err != nil {
+			return nil, err
+		}
+		files = append(files, map[string]string{"kind": "json", "name": "codexhub-state.json"})
+	}
+	if s.cfg.SQLiteFile != "" && exists(s.cfg.SQLiteFile) {
+		sqliteTarget := filepath.Join(payloadDir, "codexhub.db")
+		if sqlite3, err := exec.LookPath("sqlite3"); err == nil {
+			cmd := exec.Command(sqlite3, s.cfg.SQLiteFile, ".backup '"+sqliteTarget+"'")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return nil, fmt.Errorf("sqlite backup failed: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+		} else if err := copyFile(s.cfg.SQLiteFile, sqliteTarget); err != nil {
+			return nil, err
+		}
+		files = append(files, map[string]string{"kind": "sqlite", "name": "codexhub.db"})
+	}
+	manifest := map[string]any{"createdAt": nowISO(), "reason": reason, "version": env("CODEXHUB_VERSION", version), "storage": s.storageStatus(), "files": files, "backupName": name}
+	manifestData, _ := json.MarshalIndent(manifest, "", "  ")
+	if err := os.WriteFile(filepath.Join(payloadDir, "manifest.json"), manifestData, 0600); err != nil {
+		return nil, err
+	}
+	if err := writeTarGz(target, tmp); err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"name": name, "size": info.Size(), "modifiedAt": info.ModTime().UTC().Format(time.RFC3339)}, nil
+}
+
+func (s *server) restoreBackup(name string) error {
+	source := filepath.Join(s.cfg.BackupDir, filepath.Base(name))
+	if !exists(source) {
+		return fmt.Errorf("backup not found: %s", name)
+	}
+	tmp, err := os.MkdirTemp("", "codexhub-restore-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if err := extractTarGz(source, tmp); err != nil {
+		return err
+	}
+	var jsonSource, sqliteSource string
+	if err := filepath.WalkDir(tmp, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		switch entry.Name() {
+		case "codexhub-state.json":
+			jsonSource = path
+		case "codexhub.db":
+			sqliteSource = path
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if sqliteSource != "" && s.cfg.SQLiteFile != "" {
+		if err := os.MkdirAll(filepath.Dir(s.cfg.SQLiteFile), 0750); err != nil {
+			return err
+		}
+		if err := copyFile(sqliteSource, s.cfg.SQLiteFile); err != nil {
+			return err
+		}
+	}
+	if jsonSource != "" && s.cfg.DataFile != "" {
+		if err := os.MkdirAll(filepath.Dir(s.cfg.DataFile), 0750); err != nil {
+			return err
+		}
+		if err := copyFile(jsonSource, s.cfg.DataFile); err != nil {
+			return err
+		}
+	}
+	if sqliteSource == "" && jsonSource == "" {
+		return fmt.Errorf("backup does not contain CodexHub data files")
+	}
+	return nil
+}
+
+func (s *server) fetchLatestRelease() (string, []map[string]any, string, error) {
+	target := strings.TrimSpace(s.cfg.ReleaseManifestURL)
+	if target != "" {
+		var manifest struct {
+			Version string           `json:"version"`
+			Assets  []map[string]any `json:"assets"`
+		}
+		if err := getJSON(target, &manifest); err != nil {
+			return "", nil, target, err
+		}
+		return strings.TrimPrefix(manifest.Version, "v"), manifest.Assets, target, nil
+	}
+	var release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Size               int64  `json:"size"`
+		} `json:"assets"`
+	}
+	source := "https://api.github.com/repos/hedatu/codexhub/releases/latest"
+	if err := getJSON(source, &release); err != nil {
+		return "", nil, source, err
+	}
+	assets := []map[string]any{}
+	for _, asset := range release.Assets {
+		assets = append(assets, map[string]any{"name": asset.Name, "url": asset.BrowserDownloadURL, "size": asset.Size})
+	}
+	return strings.TrimPrefix(release.TagName, "v"), assets, release.HTMLURL, nil
+}
+
 func (s *server) storageStatus() map[string]any {
 	sqliteAvailable := false
 	if _, err := exec.LookPath("sqlite3"); err == nil {
@@ -2347,6 +2744,156 @@ func (s *server) storageStatus() map[string]any {
 		"sqliteEnabled": s.cfg.StorageDriver == "sqlite" && sqliteAvailable,
 		"sqliteNote":    note,
 	}
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func writeTarGz(target, sourceDir string) error {
+	out, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	gz := gzip.NewWriter(out)
+	defer gz.Close()
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+	return filepath.WalkDir(sourceDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(rel)
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		_, err = io.Copy(tw, in)
+		return err
+	})
+}
+
+func extractTarGz(source, targetDir string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	gz, err := gzip.NewReader(in)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		clean := filepath.Clean(header.Name)
+		if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			return fmt.Errorf("unsafe backup path: %s", header.Name)
+		}
+		path := filepath.Join(targetDir, clean)
+		if header.FileInfo().IsDir() {
+			if err := os.MkdirAll(path, 0750); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			return err
+		}
+		out, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, tr); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+}
+
+func getJSON(target string, out any) error {
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("user-agent", "CodexHub/"+env("CODEXHUB_VERSION", version))
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("GET %s failed: %d %s", target, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
+}
+
+func compareVersions(a, b string) int {
+	parse := func(value string) []int {
+		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+		parts := strings.Split(value, ".")
+		nums := make([]int, 3)
+		for i := 0; i < len(nums) && i < len(parts); i++ {
+			part := strings.TrimFunc(parts[i], func(r rune) bool { return r < '0' || r > '9' })
+			n, _ := strconv.Atoi(part)
+			nums[i] = n
+		}
+		return nums
+	}
+	x, y := parse(a), parse(b)
+	for i := 0; i < 3; i++ {
+		if x[i] > y[i] {
+			return 1
+		}
+		if x[i] < y[i] {
+			return -1
+		}
+	}
+	return 0
 }
 
 func sqliteSchemaSQL() string {

@@ -112,7 +112,7 @@
             <div class="ops-grid">
               <div class="ops-card">
                 <h3>推送通知</h3>
-                <p>可填入 FCM token 注册到云端；服务器配置 FCM/Webhook 后，任务完成可推到手机。</p>
+                <p id="pushStatusText">等待同步</p>
                 <input id="pushTokenInput" placeholder="FCM token，可留空" />
                 <div class="quick-actions">
                   <button id="registerPushBtn" class="secondary-button">注册推送令牌</button>
@@ -126,6 +126,25 @@
               <div class="ops-card">
                 <h3>数据存储</h3>
                 <p id="storageText">等待同步</p>
+              </div>
+              <div class="ops-card">
+                <h3>备份恢复</h3>
+                <p id="backupStatusText">等待同步</p>
+                <div id="backupList" class="mini-list"></div>
+                <div class="quick-actions">
+                  <button id="createBackupBtn" class="secondary-button">立即备份</button>
+                </div>
+              </div>
+              <div class="ops-card">
+                <h3>版本更新</h3>
+                <p id="updateStatusText">等待同步</p>
+                <div class="quick-actions">
+                  <button id="checkUpdateBtn" class="secondary-button">检查更新</button>
+                </div>
+              </div>
+              <div class="ops-card">
+                <h3>安全状态</h3>
+                <p id="securityStatusText">等待同步</p>
               </div>
             </div>
           </div>

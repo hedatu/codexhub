@@ -99,6 +99,8 @@ type FullThreadContext struct {
 	Truncated        bool            `json:"truncated"`
 	Redacted         bool            `json:"redacted"`
 	CollectedAt      string          `json:"collectedAt"`
+	CachedAt         string          `json:"cachedAt,omitempty"`
+	ExpiresAt        string          `json:"expiresAt,omitempty"`
 	ContextSignature string          `json:"contextSignature,omitempty"`
 	Messages         []ThreadMessage `json:"messages,omitempty"`
 }
@@ -115,6 +117,8 @@ type ProposalAuditEntry struct {
 	Decision         string        `json:"decision,omitempty"`
 	CommandID        string        `json:"commandId,omitempty"`
 	ContextSignature string        `json:"contextSignature,omitempty"`
+	PreviousHash     string        `json:"previousHash,omitempty"`
+	EntryHash        string        `json:"entryHash,omitempty"`
 	Proposal         AgentProposal `json:"proposal,omitempty"`
 }
 

@@ -264,6 +264,13 @@ func (a *app) executeCommand(command codexhub.Command) (any, error) {
 	case "refresh":
 		sessionFileIndex = nil
 		return map[string]any{"ok": true, "skipped": false, "message": "refresh acknowledged"}, nil
+	case "selfUpdate":
+		return map[string]any{
+			"ok":      true,
+			"skipped": true,
+			"message": "selfUpdate acknowledged; run the platform installer to replace binaries safely",
+			"version": version,
+		}, nil
 	case "readThreadContext":
 		threadID := stringValue(command.Action["threadId"])
 		if threadID == "" {

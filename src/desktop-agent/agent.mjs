@@ -506,6 +506,15 @@ async function executeCommand(command) {
     return { ok: true, skipped: false, message: "refresh acknowledged" };
   }
 
+  if (action.kind === "selfUpdate") {
+    return {
+      ok: true,
+      skipped: true,
+      message: "selfUpdate acknowledged; run the platform installer to replace binaries safely",
+      version: AGENT_VERSION,
+    };
+  }
+
   if (action.kind === "readThreadContext") {
     if (!action.threadId) throw new Error("readThreadContext requires threadId");
     return readFullSessionContext(

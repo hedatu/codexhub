@@ -46,6 +46,8 @@ const state = {
   liveEvents: [],
   selected: null,
   agentDrafts: new Map(),
+  fullContexts: new Map(),
+  proposalAudits: new Map(),
   replyDrafts: new Map(),
   operationMode: true,
   lastError: "",
@@ -196,6 +198,19 @@ function timeAgo(value) {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h`;
+  return new Date(millis).toLocaleDateString();
+}
+
+function timeUntil(value) {
+  const millis = toMillis(value);
+  if (!millis) return "-";
+  const seconds = Math.round((millis - Date.now()) / 1000);
+  if (seconds <= 0) return "已过期";
+  if (seconds < 60) return `${seconds}s 后`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m 后`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h 后`;
   return new Date(millis).toLocaleDateString();
 }
 
@@ -917,6 +932,7 @@ function renderModal(node, thread, intent) {
         </div>
         <p>${escapeHtml(thread.summaryText)}</p>
       </div>
+      ${renderContextTools(thread)}
       ${draft ? `
         <div class="fleet-modal-card proposal">
           <div class="fleet-section-head compact">
@@ -1050,6 +1066,91 @@ function contextList(label, items = []) {
   `;
 }
 
+function renderContextTools(thread) {
+  const key = thread.nodeIdThreadId;
+  const fullState = state.fullContexts.get(key) || null;
+  const auditState = state.proposalAudits.get(key) || null;
+  const fullContext = fullState?.fullContext || null;
+  const statusText = {
+    ready: "已缓存",
+    queued: "拉取中",
+    not_ready: "未拉取",
+    expired: "已过期",
+    cleared: "已清除",
+  }[fullState?.status] || "未拉取";
+  const statusTone = {
+    ready: "green",
+    queued: "yellow",
+    expired: "orange",
+    cleared: "slate",
+  }[fullState?.status] || "slate";
+  return `
+    <div class="fleet-modal-card context-tools">
+      <div class="fleet-section-head compact">
+        <div>
+          <p class="fleet-kicker">Context & audit</p>
+          <h3>上下文 / 审计</h3>
+        </div>
+        ${badgeHtml(statusText, statusTone)}
+      </div>
+      <div class="fleet-context-actions">
+        <button class="fleet-button ghost" data-modal-action="load_full_context" type="button">查看完整上下文</button>
+        <button class="fleet-button ghost" data-modal-action="request_full_context" type="button">拉取完整上下文</button>
+        <button class="fleet-button ghost" data-modal-action="load_proposal_audit" type="button">审计记录</button>
+        <button class="fleet-button ghost" data-modal-action="clear_full_context" type="button">清除缓存</button>
+      </div>
+      ${fullState?.message ? `<p class="fleet-context-note">${escapeHtml(fullState.message)}</p>` : ""}
+      ${fullContext ? renderFullContextPreview(fullContext) : ""}
+      ${auditState ? renderProposalAuditPreview(auditState) : ""}
+    </div>
+  `;
+}
+
+function renderFullContextPreview(fullContext) {
+  const messages = Array.isArray(fullContext.messages) ? fullContext.messages.slice(-5) : [];
+  return `
+    <div class="fleet-full-context">
+      <div class="fleet-context-meta">
+        <span>消息 ${escapeHtml(fullContext.messageCount ?? messages.length)}</span>
+        <span>${fullContext.redacted ? "已脱敏" : "未脱敏"}</span>
+        <span>缓存 ${escapeHtml(timeAgo(fullContext.cachedAt || fullContext.collectedAt))}</span>
+        ${fullContext.expiresAt ? `<span>过期 ${escapeHtml(timeUntil(fullContext.expiresAt))}</span>` : ""}
+        ${fullContext.contextSignature ? `<span>${escapeHtml(String(fullContext.contextSignature).slice(0, 12))}</span>` : ""}
+      </div>
+      <div class="fleet-full-context-list">
+        ${messages.length ? messages.map((message) => `
+          <article>
+            <strong>${escapeHtml(message.role || "message")}</strong>
+            <span>${escapeHtml(message.phase || "-")} · ${escapeHtml(timeAgo(message.at))}</span>
+            <p>${escapeHtml(compactText(message.text, 320))}</p>
+          </article>
+        `).join("") : `<div class="fleet-empty">完整上下文暂无可展示消息。</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderProposalAuditPreview(auditState) {
+  const audits = Array.isArray(auditState.audits) ? auditState.audits.slice(0, 8) : [];
+  return `
+    <div class="fleet-proposal-audit">
+      <div class="fleet-context-meta">
+        <span>审计 ${escapeHtml(auditState.totalAudits ?? audits.length)}</span>
+        <span>加载 ${escapeHtml(timeAgo(auditState.loadedAt))}</span>
+      </div>
+      <div class="fleet-audit-list">
+        ${audits.length ? audits.map((entry) => `
+          <article>
+            <strong>${escapeHtml(entry.event || "-")}</strong>
+            <span>${escapeHtml(entry.actor || "-")} · ${escapeHtml(entry.decision || entry.risk || "-")} · ${escapeHtml(timeAgo(entry.at))}</span>
+            <code>${escapeHtml(String(entry.entryHash || entry.contextSignature || entry.proposalId || "").slice(0, 18))}</code>
+          </article>
+        `).join("") : `<div class="fleet-empty">暂无 proposal 审计记录。</div>`}
+      </div>
+    </div>
+  `;
+}
+
 function intentTitle(intent) {
   return {
     approve: "审批与回复",
@@ -1096,6 +1197,84 @@ function proposalActionMetadata(draft, decision) {
   };
 }
 
+function rerenderSelectedModal() {
+  const selected = state.selected;
+  if (!selected) return;
+  const node = (state.dashboard?.nodes || []).find((item) => item.id === selected.nodeId);
+  const thread = state.view?.threads.find((item) => item.nodeId === selected.nodeId && item.id === selected.threadId) ||
+    (node?.threads || []).find((item) => item.id === selected.threadId);
+  if (!node || !thread) return;
+  const normalized = thread.nodeId ? thread : normalizeDashboard({ nodes: [node], totals: {} }).threads.find((item) => item.id === selected.threadId);
+  renderModal(node, normalized, selected.intent);
+}
+
+async function handleContextToolAction(action, thread) {
+  const key = thread.nodeIdThreadId;
+  if (state.mockMode) {
+    if (action === "load_full_context" || action === "request_full_context") {
+      state.fullContexts.set(key, {
+        status: action === "request_full_context" ? "queued" : "ready",
+        message: action === "request_full_context" ? "预览模式：完整上下文拉取已排队。" : "",
+        loadedAt: new Date().toISOString(),
+        fullContext: action === "load_full_context" ? {
+          threadId: thread.id,
+          nodeId: thread.nodeId,
+          mode: "full",
+          messageCount: 2,
+          redacted: true,
+          truncated: false,
+          collectedAt: new Date().toISOString(),
+          cachedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+          contextSignature: String(hashValue(key)),
+          messages: [
+            { role: "user", phase: "message", at: nowMinus(240), text: thread.titleText },
+            { role: "assistant", phase: "progress", at: nowMinus(120), text: thread.summaryText },
+          ],
+        } : null,
+      });
+      showToast(action === "request_full_context" ? "完整上下文拉取已排队" : "完整上下文已加载");
+    } else if (action === "clear_full_context") {
+      state.fullContexts.delete(key);
+      showToast("完整上下文缓存已清除");
+    } else if (action === "load_proposal_audit") {
+      state.proposalAudits.set(key, {
+        loadedAt: new Date().toISOString(),
+        totalAudits: 1,
+        audits: [{ event: "created", actor: "admin", risk: thread.risk, at: new Date().toISOString(), entryHash: String(hashValue(key)) }],
+      });
+      showToast("审计记录已加载");
+    }
+    rerenderSelectedModal();
+    return;
+  }
+  try {
+    if (action === "load_full_context") {
+      const payload = await apiFetch(`/api/nodes/${encodeURIComponent(thread.nodeId)}/threads/${encodeURIComponent(thread.id)}/context-bundle?mode=full`);
+      state.fullContexts.set(key, { ...payload, loadedAt: new Date().toISOString() });
+      showToast(payload.status === "ready" ? "完整上下文已加载" : "完整上下文未就绪");
+    } else if (action === "request_full_context") {
+      const payload = await apiFetch(`/api/nodes/${encodeURIComponent(thread.nodeId)}/threads/${encodeURIComponent(thread.id)}/context-request`, {
+        method: "POST",
+        body: JSON.stringify({ maxMessages: 300, maxChars: 240000 }),
+      });
+      state.fullContexts.set(key, { ...payload, loadedAt: new Date().toISOString(), message: payload.deduped ? "已有拉取任务正在执行。" : "完整上下文拉取已排队。" });
+      showToast(payload.deduped ? "已有完整上下文拉取任务" : "完整上下文拉取已排队");
+    } else if (action === "clear_full_context") {
+      await apiFetch(`/api/nodes/${encodeURIComponent(thread.nodeId)}/threads/${encodeURIComponent(thread.id)}/context-clear`, { method: "POST" });
+      state.fullContexts.delete(key);
+      showToast("完整上下文缓存已清除");
+    } else if (action === "load_proposal_audit") {
+      const payload = await apiFetch(`/api/nodes/${encodeURIComponent(thread.nodeId)}/threads/${encodeURIComponent(thread.id)}/proposals?limit=20`);
+      state.proposalAudits.set(key, { ...payload, loadedAt: new Date().toISOString() });
+      showToast("审计记录已加载");
+    }
+    rerenderSelectedModal();
+  } catch (error) {
+    showToast(`上下文操作失败：${error.message}`);
+  }
+}
+
 async function handleModalAction(action) {
   const selected = state.selected;
   if (!selected) return;
@@ -1108,6 +1287,10 @@ async function handleModalAction(action) {
   }
   const draft = thread.draft || state.agentDrafts.get(thread.nodeIdThreadId);
   const draftState = draft ? proposalState(draft, thread) : null;
+  if (["load_full_context", "request_full_context", "clear_full_context", "load_proposal_audit"].includes(action)) {
+    await handleContextToolAction(action, thread);
+    return;
+  }
   const text = document.querySelector("#fleetReplyText")?.value?.trim() || defaultReply(thread, action);
   if (action === "approve" && draftState?.expired) {
     showToast("Agent 草稿已过期，请重新生成后再批准");
